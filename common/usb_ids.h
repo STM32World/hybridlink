@@ -73,8 +73,8 @@
 #define DAP_USB_PRODUCT     "hybridlink CMSIS-DAP"
 #endif
 
-#define HYBRIDLINK_VERSION  "0.4.0"
+#define HYBRIDLINK_VERSION  "0.5.0"      /* make dist / releases use this */
 #define HYBRIDLINK_VER_MAJOR 0
-#define HYBRIDLINK_VER_MINOR 4
+#define HYBRIDLINK_VER_MINOR 5
 
 #endif

@@ -1,0 +1,83 @@
+# Builds the firmware and the host tool package and publishes them as a
+# GitHub release when a version tag (v0.5.0, ...) is pushed. The tag must
+# match HYBRIDLINK_VERSION in common/usb_ids.h.
+#
+# Pushes to master and manual runs (Actions tab, "Run workflow") only build
+# and keep the files as a workflow artifact.
+name: release
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - name: Install the toolchain
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            git ca-certificates make python3 \
+            gcc-arm-none-eabi picolibc-arm-none-eabi
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Build
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          # picolibc's location differs between distribution releases
+          specs=$(find /usr -name picolibc.specs -path '*arm-none-eabi*' | head -1)
+          dir=$(dirname "$specs")
+          [ -d "$dir/include" ] && inc="$dir/include" || inc="$(dirname "$dir")/include"
+          echo "picolibc: $specs, $inc"
+          make dist LIBC_SPECS="$specs" LIBC_INC="$inc"
+          version=$(sed -n 's/^#define HYBRIDLINK_VERSION *"\([^"]*\)".*/\1/p' common/usb_ids.h)
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Check the tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          if [ "${GITHUB_REF_NAME}" != "v${VERSION}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match HYBRIDLINK_VERSION ${VERSION}"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hybridlink-${{ env.VERSION }}
+          path: |
+            build/hybridlink-${{ env.VERSION }}.tar.gz
+            build/hybridlink-${{ env.VERSION }}.zip
+            build/hybridlink-daplink.bin
+            build/hybridlink-full.bin
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: hybridlink ${{ env.VERSION }}
+          body: |
+            * `hybridlink-${{ env.VERSION }}.tar.gz` / `.zip`: the `hybridlink` tool
+              (`bin/`) with all firmware images (`share/hybridlink/`). Unpack and run
+              `bin/hybridlink install` (Python 3 with `pyusb` and `cryptography`, and
+              `dfu-util`), or on Windows `python bin\hybridlink install`.
+            * `hybridlink-daplink.bin`: for probes running DAPLink, drag and drop onto
+              the DAPLINK drive, then reconnect the probe.
+            * `hybridlink-full.bin`: bootloader + application for flashing over SWD at
+              `0x08000000`.
+
+            See the README for details.
+          files: |
+            build/hybridlink-${{ env.VERSION }}.tar.gz
+            build/hybridlink-${{ env.VERSION }}.zip
+            build/hybridlink-daplink.bin
+            build/hybridlink-full.bin

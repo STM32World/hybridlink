@@ -100,6 +100,19 @@ uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/hybridlink
 	rm -rf $(DESTDIR)$(PREFIX)/share/hybridlink
 
+# release archives: build/hybridlink-<version>.tar.gz and .zip, laid out like
+# an installation (bin/hybridlink, share/hybridlink/*.bin) plus the docs
+VERSION := $(shell sed -n 's/^\#define HYBRIDLINK_VERSION *"\([^"]*\)".*/\1/p' common/usb_ids.h)
+DIST    := hybridlink-$(VERSION)
+
+dist: all
+	rm -rf $(BUILD)/dist && mkdir -p $(BUILD)/dist
+	$(MAKE) --no-print-directory install BUILD=$(BUILD) PREFIX= DESTDIR=$(BUILD)/dist/$(DIST)
+	cp README.md LICENSE $(BUILD)/dist/$(DIST)/
+	tar -C $(BUILD)/dist -czf $(BUILD)/$(DIST).tar.gz $(DIST)
+	cd $(BUILD)/dist && python3 -m zipfile -c ../$(DIST).zip $(DIST)
+	@echo "$(BUILD)/$(DIST).tar.gz $(BUILD)/$(DIST).zip"
+
 -include $(BOOT_OBJ:.o=.d) $(APP_OBJ:.o=.d) $(INST_OBJ:.o=.d)
 
-.PHONY: all clean install uninstall
+.PHONY: all clean install uninstall dist

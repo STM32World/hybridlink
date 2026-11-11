@@ -78,6 +78,24 @@ the VCP. The command processor is written from the published protocol
 setups apply; tools find CMSIS-DAP probes by the product string, so any
 VID/PID works (`DAP_USB_VID` / `DAP_USB_PID` at build time).
 
+## Downloads
+
+No toolchain needed: each [release](https://github.com/STM32World/hybridlink/releases)
+has
+
+* `hybridlink-<version>.tar.gz` / `.zip`: the `hybridlink` tool (`bin/`) and
+  all firmware images (`share/hybridlink/`). Unpack it and run
+  `bin/hybridlink install` (on Windows `python bin\hybridlink install`). It
+  needs Python 3 with `pyusb` and `cryptography`, and `dfu-util`.
+* `hybridlink-daplink.bin`: for probes running DAPLink, drag and drop onto
+  the DAPLINK drive (see [Installing](#installing)).
+* `hybridlink-full.bin`: bootloader and application, for flashing over SWD.
+
+Releases are built by [.github/workflows/release.yml](.github/workflows/release.yml)
+when a tag `v<version>` matching `HYBRIDLINK_VERSION` in
+[common/usb_ids.h](common/usb_ids.h) is pushed; `make dist` builds the same
+archives locally.
+
 ## Building
 
 Needs `arm-none-eabi-gcc` and a C library (picolibc is used by default;
