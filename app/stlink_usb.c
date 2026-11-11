@@ -139,16 +139,23 @@ static void send_in_chunk(void)
 }
 
 /* ---- trace endpoint ---------------------------------------------------
- * The trace endpoint is a stream: full packets are fed from the SWO buffer
- * as soon as the host takes the previous one, a short packet only once the
- * line has been quiet for a while. GET_TRACE_NB reports everything not yet
- * delivered, so the host may read any amount per poll. */
+ * Hosts read trace data in one of two ways:
+ *  - polled (ST's gdbserver, OpenOCD): GET_TRACE_NB, then a bulk read of
+ *    exactly that many bytes. The packets sent must add up to the count:
+ *    an early short packet ends the read too soon, a packet larger than
+ *    what is left overflows it. So once polled, only the bytes promised
+ *    by the last count are sent.
+ *  - streamed (no GET_TRACE_NB): full packets as soon as the host takes
+ *    the previous one, a short packet once the line has been quiet. */
 
 #define TRACE_PKT       32u
 #define TRACE_QUIET_MS  5u
 
 static uint8_t trace_pkt[TRACE_PKT];
-static uint32_t trace_inflight;
+static uint32_t trace_inflight;         /* queued on the endpoint        */
+static uint32_t trace_owed;             /* promised, not yet queued      */
+static uint32_t trace_limit;            /* host buffer size, 0: none     */
+static bool trace_polled;
 static uint32_t trace_seen, trace_change;
 
 static uint32_t trace_fill(uint32_t want)
@@ -178,32 +185,70 @@ static bool trace_quiet(uint32_t avail)
     return now - trace_change >= TRACE_QUIET_MS;
 }
 
-static void trace_task(void)
+static void trace_update_inflight(void)
 {
     if (!usbd_edpt_busy(rhport_used, EP_TRACE_IN))
         trace_inflight = 0;
+}
+
+static void trace_queue(uint32_t n)
+{
+    if (n && usbd_edpt_xfer(rhport_used, EP_TRACE_IN, trace_pkt, (uint16_t)n, false))
+        trace_inflight = n;
+}
+
+static void trace_task(void)
+{
+    trace_update_inflight();
+    if (trace_inflight)
+        return;
+    if (trace_polled) {
+        if (!trace_owed)
+            return;
+        uint32_t want = trace_owed < TRACE_PKT ? trace_owed : TRACE_PKT;
+        uint32_t n = trace_fill(want);
+        if (n < want)                   /* lost to an overrun: pad with */
+            memset(trace_pkt + n, 0, want - n);    /* ITM sync bytes */
+        trace_owed -= want;
+        trace_queue(want);
+        return;
+    }
     uint32_t avail = hal_swo_available();
     bool quiet = trace_quiet(avail);
-    if (trace_inflight || !avail)
-        return;
-    if (avail < TRACE_PKT && !quiet)
+    if (!avail || (avail < TRACE_PKT && !quiet))
         return;
     uint32_t n = trace_fill(avail < TRACE_PKT ? avail : TRACE_PKT);
     trace_seen = hal_swo_available();
-    if (n && usbd_edpt_xfer(rhport_used, EP_TRACE_IN, trace_pkt, (uint16_t)n, false))
-        trace_inflight = n;
+    trace_queue(n);
+}
+
+void stlink_trace_reset(uint32_t host_buf)
+{
+    trace_owed = 0;
+    trace_polled = false;
+    trace_limit = host_buf;
 }
 
 uint32_t stlink_trace_count(void)
 {
     if (!opened)
         return 0;
-    if (!usbd_edpt_busy(rhport_used, EP_TRACE_IN))
-        trace_inflight = 0;
-    uint32_t avail = hal_swo_available();
-    if (!trace_quiet(avail))
-        avail -= avail % TRACE_PKT;      /* partial packet not sent yet */
-    return trace_inflight + avail;
+    trace_update_inflight();
+    if (trace_polled && (trace_inflight || trace_owed))
+        return trace_inflight + trace_owed;     /* not read yet */
+    if (!trace_polled) {
+        trace_polled = true;
+        if (trace_inflight)             /* streamed before the first poll */
+            return trace_inflight;
+    }
+    uint32_t n = hal_swo_available();
+    if (trace_limit && n > trace_limit)
+        n = trace_limit;
+    if (n > 0xFFFFu)
+        n = 0xFFFFu;
+    trace_owed = n;
+    trace_task();                       /* get the first packet going */
+    return n;
 }
 
 /* called from the main loop */

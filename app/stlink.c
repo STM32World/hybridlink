@@ -390,11 +390,13 @@ static uint32_t debug_command(const uint8_t *c, uint8_t *r)
 
     case DBG_APIV2_START_TRACE_RX:
         trace_max = get16(c + 2);
+        stlink_trace_reset(trace_max);
         trace_on = hal_swo_start(get32(c + 4));
         return reply_status(r, trace_on ? STLINK_OK : STLINK_FALSE);
 
     case DBG_APIV2_STOP_TRACE_RX:
         hal_swo_stop();
+        stlink_trace_reset(0);
         trace_on = false;
         return reply_status(r, STLINK_OK);
 

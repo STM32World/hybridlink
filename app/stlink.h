@@ -27,6 +27,8 @@ bool     stlink_debug_active(void);
 
 /* trace (SWO) bytes not yet delivered to the host (USB layer) */
 uint32_t stlink_trace_count(void);
+/* trace reception (re)started or stopped; host_buf: host buffer, 0: none */
+void     stlink_trace_reset(uint32_t host_buf);
 
 /* the USB layer calls this when a bootloader switch was requested */
 bool     stlink_bootloader_requested(void);
