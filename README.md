@@ -45,6 +45,26 @@ with two interfaces:
   STM32CubeIDE and STM32CubeProgrammer) can install ST firmware
 * interface 1: standard USB DFU 1.1, for hybridlink images with dfu-util
 
+## USB power
+
+Both the Jolt Connect and the Streamline Connect bring 5 V and 3.3 V out on
+the target connector, and their supply easily handles 1 A, so a target board
+can be powered from the probe.
+
+What a USB device may draw is set by what it asks for: each configuration
+descriptor carries `bMaxPower`, and USB 2.0 allows at most 500 mA. A genuine
+ST-Link/V2-1 asks for 100 mA (bootloader and firmware alike), so a target
+that draws more than that is over the probe's budget, and hosts or hubs that
+enforce power budgets (bus-powered hubs, some laptops and single-board
+computers) may cut the port or refuse the configuration.
+
+hybridlink asks for the USB 2.0 maximum, 500 mA, in both modes and in the
+bootloader (`USB_MAX_POWER_MA` in [common/usb_ids.h](common/usb_ids.h)).
+The probe itself draws only a few tens of milliamps, so most of that is
+available to the target. Beyond 500 mA it depends on the port: many ports
+(chargers, USB 3 and USB-C ports) supply more without asking, but the probe
+does not negotiate it.
+
 ## Probe modes
 
 | mode | USB | for |
