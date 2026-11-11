@@ -298,7 +298,8 @@ page is kept when the version is rewritten.
 * DFU upload (`dfu-util -U`) reads the application back, for hybridlink
   images only (marked with `HLNK` in the first reserved vector table slot):
   other firmware installed through the ST protocol, such as ST's own, is
-  not readable over USB.
+  not readable over USB. `make DFU_UPLOAD_ANY=1` builds a bootloader that
+  reads back any application.
 * Leaves for the application on DFU detach or the bus reset after
   `dfu-util -R`.
 

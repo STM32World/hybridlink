@@ -145,10 +145,12 @@ void tud_dfu_manifest_cb(uint8_t alt)
 uint16_t tud_dfu_upload_cb(uint8_t alt, uint16_t block, uint8_t *data, uint16_t len)
 {
     (void)alt;
+#if !DFU_UPLOAD_ANY
     /* only hybridlink images are read back: other firmware installed
      * through the ST protocol (ST's own) stays unreadable over USB */
     if (*(const uint32_t *)(APP_BASE + HL_IMAGE_MAGIC_OFF) != HL_IMAGE_MAGIC)
         return 0;
+#endif
     uint32_t addr = APP_BASE + (uint32_t)block * CFG_TUD_DFU_XFER_BUFSIZE;
     if (addr >= image_flash_end())
         return 0;

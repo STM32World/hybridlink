@@ -27,6 +27,10 @@ TUSB_SRC := $(TUSB)/tusb.c $(TUSB)/common/tusb_fifo.c $(TUSB)/device/usbd.c \
 COMMON_SRC := common/usb_serial.c $(PORT_SRC)
 
 ST_COMPAT ?= 1
+# 1: DFU upload reads back any application, also ST's firmware installed
+# through the ST protocol (for your own builds; the default only reads back
+# hybridlink images)
+DFU_UPLOAD_ANY ?= 0
 BOOT_SRC := $(wildcard bootloader/*.c) $(COMMON_SRC) $(TUSB_SRC) $(TUSB)/class/dfu/dfu_device.c
 APP_SRC  := $(wildcard app/*.c) $(COMMON_SRC) $(TUSB_SRC) $(TUSB)/class/cdc/cdc_device.c
 
@@ -39,7 +43,7 @@ all: $(BUILD)/bootloader.bin $(BUILD)/app.bin $(BUILD)/hybridlink-full.bin \
 
 $(BUILD)/bootloader/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -Ibootloader -DST_COMPAT=$(ST_COMPAT) -MMD -c $< -o $@
+	$(CC) $(CFLAGS) -Ibootloader -DST_COMPAT=$(ST_COMPAT) -DDFU_UPLOAD_ANY=$(DFU_UPLOAD_ANY) -MMD -c $< -o $@
 
 $(BUILD)/app/%.o: %.c
 	@mkdir -p $(dir $@)
