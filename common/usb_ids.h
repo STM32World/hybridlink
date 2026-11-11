@@ -64,8 +64,10 @@
 #define STLINK_USB_PRODUCT  "hybridlink ST-Link compatible"  /* max 32 chars */
 #endif
 
+/* CMSIS-DAP tools find the probe by "CMSIS-DAP" in the product string;
+ * the manufacturer is only shown (also as the DAP_Info vendor) */
 #ifndef DAP_USB_MANUFACTURER
-#define DAP_USB_MANUFACTURER "hybridlink"
+#define DAP_USB_MANUFACTURER STLINK_USB_MANUFACTURER
 #endif
 #ifndef DAP_USB_PRODUCT
 #define DAP_USB_PRODUCT     "hybridlink CMSIS-DAP"
