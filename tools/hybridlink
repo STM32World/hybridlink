@@ -1,0 +1,722 @@
+#!/usr/bin/env python3
+"""hybridlink host helper.
+
+  hybridlink info  [--serial SN]   show version / mode / target voltage
+  hybridlink dfu   [--serial SN]   switch the probe into the DFU bootloader
+  hybridlink update [app.bin] [--serial SN]
+                                      switch to the bootloader and flash the
+                                      application (dfu-util, or ST's protocol
+                                      when the probe kept ST's bootloader)
+  hybridlink install [image] [--app app.bin] [--serial SN]
+                                      replace the probe's bootloader (ST's,
+                                      DAPLink's or an older hybridlink one)
+                                      over USB and install the application;
+                                      a protected ST bootloader stays and the
+                                      application runs under it
+  hybridlink set-type stlink | dap [--serial SN]
+                                      switch between ST-Link and CMSIS-DAP
+                                      (DAPLink compatible) mode
+  hybridlink set-version V2J49M36 | default | auto [--serial SN]
+                                      change the ST-Link version the probe
+                                      reports; "auto" raises it until the
+                                      installed ST-LINK_gdbservers neither
+                                      refuse it nor ask for an update
+
+Images are looked up in ../build next to this script (a source tree) and
+then in ../share/hybridlink (after make install).
+"""
+import argparse, glob, os, re, socket, subprocess, sys, time
+import usb.core, usb.util
+
+ST_VID = 0x0483
+ST_PIDS = (0x3748, 0x374A, 0x374B, 0x3752)
+DAP_IDS = ((0x0D28, 0x0204),)            # hybridlink in CMSIS-DAP mode
+DFU_ID = "0483:3748"
+MODES = {"stlink": 0, "dap": 1, "daplink": 1, "cmsis-dap": 1}
+MODE_NAMES = {0: "ST-Link", 1: "CMSIS-DAP"}
+
+# vendor control requests of the hybridlink application (common/settings.h)
+HL_REQ_GET_VERSION = 0x01
+HL_REQ_SET_VERSION = 0x02
+HL_REQ_GET_MODE = 0x03
+HL_REQ_SET_MODE = 0x04
+HL_REQ_ENTER_DFU = 0x05
+HL_REQ_MAGIC = 0x484C
+
+
+def serial_of(d, errors=None):
+    try:
+        return d.serial_number
+    except (usb.core.USBError, ValueError) as e:
+        if errors is not None:
+            errors.append(f"{d.idVendor:04x}:{d.idProduct:04x} on bus {d.bus} "
+                          f"device {d.address}: {e}")
+        return None
+
+
+def find(serial, wait=0.0):
+    """the probe: an ST-Link, or hybridlink in CMSIS-DAP mode"""
+    t = time.time()
+    while True:
+        errors = []                         # candidates that did not answer
+        for d in usb.core.find(find_all=True):
+            ids = (d.idVendor, d.idProduct)
+            st = d.idVendor == ST_VID and d.idProduct in ST_PIDS
+            if not st and ids not in DAP_IDS:
+                continue
+            sn = serial_of(d, errors)
+            if serial is not None and sn != serial:
+                continue
+            if not st and hl_versions(d) is None:
+                continue                    # some other CMSIS-DAP probe
+            return d
+        if time.time() - t >= wait:
+            if errors:
+                sys.exit("a probe is on USB but does not answer:\n  " +
+                         "\n  ".join(errors) +
+                         "\n(permissions: check the udev rules; otherwise unplug and "
+                         "replug it)")
+            sys.exit("no hybridlink / ST-Link probe found")
+        time.sleep(0.2)
+
+
+def is_dap(d):
+    return (d.idVendor, d.idProduct) in DAP_IDS
+
+
+def cmd(d, b, n=0):
+    ep_out = 0x02 if d.idProduct == 0x3748 else 0x01
+    d.write(ep_out, bytes(b) + bytes(16 - len(b)), 1000)
+    return bytes(d.read(0x81, n, 1000)) if n else b""
+
+
+def vstr(v):
+    return f"V{v >> 12}J{(v >> 6) & 0x3F}M{v & 0x3F}"
+
+
+def vparse(s):
+    m = re.fullmatch(r"V?(\d+)J(\d+)M(\d+)", s.upper())
+    if not m:
+        sys.exit(f"bad version {s!r}, expected e.g. V2J49M36")
+    a, b, c = map(int, m.groups())
+    if a != 2 or not 0 < b < 64 or not 0 <= c < 64:
+        sys.exit("version out of range (V2, J1..63, M0..63)")
+    return (a << 12) | (b << 6) | c
+
+
+def hl_versions(d):
+    """(reported, stored, default, fw major, fw minor) or None if not hybridlink"""
+    try:
+        r = bytes(d.ctrl_transfer(0xC0, HL_REQ_GET_VERSION, 0, HL_REQ_MAGIC, 8, 1000))
+    except usb.core.USBError:
+        return None
+    if len(r) != 8:
+        return None
+    return (int.from_bytes(r[0:2], "big"), int.from_bytes(r[2:4], "big"),
+            int.from_bytes(r[4:6], "big"), r[6], r[7])
+
+
+def hl_mode(d):
+    try:
+        r = bytes(d.ctrl_transfer(0xC0, HL_REQ_GET_MODE, 0, HL_REQ_MAGIC, 2, 1000))
+    except usb.core.USBError:
+        return None
+    return r[0] if len(r) == 2 else None
+
+
+def info(d):
+    print(f"serial   {d.serial_number}")
+    m = hl_mode(d)
+    if m is not None:
+        print(f"mode     {MODE_NAMES.get(m, m)}")
+    if is_dap(d):
+        o = hl_versions(d)
+        print(f"firmware hybridlink {o[3]}.{o[4]} (USB {d.idVendor:04x}:{d.idProduct:04x})")
+        return
+    v = cmd(d, [0xF1, 0x80], 6)
+    ver = (v[0] << 8) | v[1]
+    print(f"version  {vstr(ver)}  "
+          f"(USB {v[3]:02x}{v[2]:02x}:{v[5]:02x}{v[4]:02x})")
+    o = hl_versions(d) if d.idProduct == 0x3752 else None
+    if o:
+        src = "default" if o[1] in (0xFFFF, 0) else "configuration page"
+        print(f"firmware hybridlink {o[3]}.{o[4]}, version from {src}, "
+              f"default {vstr(o[2])}")
+    print(f"st mode  {cmd(d, [0xF5], 2)[0]}")
+    if d.idProduct == 0x3748:
+        kind = "hybridlink" if interfaces(d) == 2 else "ST"
+        print(f"state    {kind} bootloader")
+        return
+    r = cmd(d, [0xF7], 8)
+    a, b = int.from_bytes(r[0:4], "little"), int.from_bytes(r[4:8], "little")
+    print(f"target   {2 * 1.2 * b / a:.2f} V" if a else "target   n/a")
+
+
+def enter_dfu(d):
+    if is_dap(d):
+        try:
+            d.ctrl_transfer(0x40, HL_REQ_ENTER_DFU, 0, HL_REQ_MAGIC, None, 1000)
+        except usb.core.USBError:
+            pass
+        usb.util.dispose_resources(d)
+        return
+    if cmd(d, [0xF9, 0x00], 2)[0] != 0x80:
+        sys.exit("probe does not support the bootloader command")
+    try:
+        cmd(d, [0xF9, 0x01])
+    except usb.core.USBError:
+        pass
+    usb.util.dispose_resources(d)
+
+
+def dfu_flash(sn, image):
+    """flash the application with dfu-util; its final USB reset may race
+    the probe restarting by itself, so a completed download counts"""
+    p = subprocess.run(["dfu-util", "-d", DFU_ID, "-S", sn, "-a", "0", "-D", image, "-R"],
+                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    lines = [l for l in p.stdout.replace("\r", "\n").splitlines()
+             if l.strip() and not l.startswith("Download\t")]
+    if p.returncode and "Done!" not in p.stdout:
+        print("\n".join(lines))
+        return False
+    print(f"  {os.path.basename(image)} written")
+    return True
+
+
+# ---- bootloader install ------------------------------------------------------
+#
+# The installer (build/installer.bin) is an application that writes the
+# hybridlink bootloader it carries over the existing one. It is uploaded
+# through the bootloader's ST update protocol, which ST's own bootloader and
+# the hybridlink bootloader both speak:
+#   F3 01 DNLOAD  block 0: 0x41 erase page / 0x21 set address (5 bytes)
+#                 block >= 2: data, AES encrypted with the device key
+#   F3 03 GETSTATUS, F3 07 leave
+# The order follows ST's updater: invalidate the "application valid" marker
+# in the last word of flash, write the image in 3 KiB groups, write the
+# marker again, leave.
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+
+
+def image_path(name):
+    """a firmware image from the source tree's build directory or from
+    the installed share/hybridlink directory"""
+    paths = [os.path.join(HERE, "..", d, name) for d in ("build", "share/hybridlink")]
+    return next((os.path.normpath(p) for p in paths if os.path.isfile(p)),
+                os.path.normpath(paths[0]))
+
+
+# ST's bootloader encrypts data blocks with AES-128-ECB, on byte swapped
+# 32-bit words, with a per-device key derived from the device info
+ST_MASTER_KEY = b"I am key, wawawa"
+
+
+def swap32(b):
+    return b"".join(b[i:i + 4][::-1] for i in range(0, len(b), 4))
+
+
+def st_encrypt(key, data):
+    try:
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    except ImportError:
+        sys.exit("talking to ST's bootloader needs the Python 'cryptography' package")
+    e = Cipher(algorithms.AES(swap32(key)), modes.ECB()).encryptor()
+    return swap32(e.update(swap32(data)) + e.finalize())
+
+
+def st_device_key(info):
+    """info = the 20 byte F3 08 reply: flash size word, 4 bytes, 12 byte UID"""
+    return st_encrypt(ST_MASTER_KEY, info[0:4] + info[8:20])
+ST_APP_VALID = b"\xff" * 12 + bytes.fromhex("d32700a5")
+BOOT_PID = 0x3748
+
+
+def bootloaders():
+    return [d for d in usb.core.find(find_all=True, idVendor=ST_VID, idProduct=BOOT_PID)]
+
+
+def interfaces(d):
+    try:
+        return d.get_active_configuration().bNumInterfaces
+    except usb.core.USBError:
+        return d[0].bNumInterfaces
+
+
+def wait_bootloader(sn, timeout, want=None):
+    """the probe in a bootloader (matched by serial, or the only one present);
+    want = 1 for ST's bootloader, 2 for the hybridlink one"""
+    t = time.time()
+    while time.time() - t < timeout:
+        bl = bootloaders()
+        hit = [d for d in bl if serial_of(d) == sn]
+        if not hit and len(bl) == 1:
+            hit = bl
+        if hit and (want is None or interfaces(hit[0]) == want):
+            return hit[0]
+        time.sleep(0.2)
+    return None
+
+
+def st_status(d):
+    while True:
+        r = cmd(d, [0xF3, 0x03], 6)
+        state, status = r[4], r[0]
+        if state == 10:
+            sys.exit(f"bootloader reported error {status}")
+        if state != 4:
+            return
+        time.sleep(max(r[1] | (r[2] << 8) | (r[3] << 16), 5) / 1000.0)
+
+
+def st_dnload(d, blk, plain, key=None):
+    data = plain if blk == 0 else st_encrypt(key, plain)
+    cks = sum(plain) & 0xFFFF
+    cmd(d, [0xF3, 0x01, blk & 0xFF, blk >> 8, cks & 0xFF, cks >> 8,
+            len(data) & 0xFF, len(data) >> 8])
+    d.write(0x02, data, 2000)
+    st_status(d)
+
+
+def st_op(d, op, addr):
+    st_dnload(d, 0, bytes([op]) + addr.to_bytes(4, "little"))
+
+
+def st_upload(d, image, base=0x08004000):
+    """write image at base through the ST update protocol and leave"""
+    cmd(d, [0xF1, 0x80], 6)
+    cmd(d, [0xF5], 2)
+    info = cmd(d, [0xF3, 0x08], 20)
+    key = st_device_key(info)
+    flash_end = 0x08000000 + int.from_bytes(info[0:2], "little") * 1024
+    if not 64 * 1024 <= flash_end - 0x08000000 <= 512 * 1024:
+        sys.exit(f"unexpected flash size in the device info {info.hex()}")
+    marker = flash_end - 16
+    image += b"\xff" * (-len(image) % 16)
+    if base + len(image) > marker - 1024:
+        sys.exit("image too large")
+
+    st_op(d, 0x41, flash_end - 1024)
+    st_op(d, 0x21, marker)
+    st_dnload(d, 2, b"\xff" * 16, key)
+    for g in range(0, len(image), 3072):
+        chunk = image[g:g + 3072]
+        for p in range(0, len(chunk), 1024):
+            st_op(d, 0x41, base + g + p)
+        for i, p in enumerate(range(0, len(chunk), 1024)):
+            st_op(d, 0x21, base + g + p)
+            st_dnload(d, 2 + i, chunk[p:p + 1024], key)
+        print(f"\r  {min(g + 3072, len(image))}/{len(image)} bytes", end="", flush=True)
+    print()
+    st_op(d, 0x41, flash_end - 1024)
+    st_op(d, 0x21, marker)
+    st_dnload(d, 2, ST_APP_VALID, key)
+    try:
+        cmd(d, [0xF3, 0x07])
+    except usb.core.USBError:
+        pass
+    usb.util.dispose_resources(d)
+
+
+def st_leave(d):
+    """make ST's bootloader start the application"""
+    cmd(d, [0xF1, 0x80], 6)
+    cmd(d, [0xF5], 2)
+    try:
+        cmd(d, [0xF3, 0x07])
+    except usb.core.USBError:
+        pass
+    usb.util.dispose_resources(d)
+
+
+def in_st_bootloader(d):
+    return d.idProduct == BOOT_PID and interfaces(d) == 1
+
+
+# ---- DAPLink -----------------------------------------------------------------
+#
+# DAPLink's interface firmware accepts a bootloader update dropped on its
+# DAPLINK drive (build/hybridlink-daplink.bin, see tools/mkdaplink.py). It
+# keeps the probe bootable throughout (the first sector points at the
+# interface until the very end) and checks a CRC before switching over.
+
+DAPLINK_HIC_IDS = ("97969908",)          # stm32f103xb
+
+
+def daplinks():
+    """genuine DAPLink probes (not hybridlink in CMSIS-DAP mode)"""
+    out = []
+    for d in usb.core.find(find_all=True):
+        if (d.idVendor, d.idProduct) in DAP_IDS and hl_versions(d) is None:
+            out.append(d)
+    return out
+
+
+def details(path):
+    r = {}
+    try:
+        for line in open(os.path.join(path, "DETAILS.TXT"), errors="replace"):
+            k, _, v = line.partition(":")
+            r[k.strip()] = v.strip()
+    except OSError:
+        return None
+    return r
+
+
+def daplink_drive(sn, mount=True):
+    """mount point of the DAPLINK drive of the probe with this serial"""
+    user = os.environ.get("USER", "")
+    roots = [f"/media/{user}", f"/run/media/{user}", "/media", "/mnt", "/Volumes"]
+    cands = [os.path.join(r, n) for r in roots if os.path.isdir(r) for n in os.listdir(r)]
+    cands += [f"{c}:\\" for c in "DEFGHIJKLMNOPQRSTUVWXYZ"] if os.name == "nt" else []
+    for c in cands:
+        i = details(c)
+        if i and i.get("Unique ID", "").lower() == sn.lower():
+            return c
+    if mount and sys.platform.startswith("linux"):
+        for dev in glob.glob(f"/dev/disk/by-id/usb-*{sn}*"):
+            if dev[-6:-1] == "-part":
+                continue
+            subprocess.call(["udisksctl", "mount", "--no-user-interaction", "-b",
+                             os.path.realpath(dev)],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return daplink_drive(sn, mount=False)
+    return None
+
+
+def wait_drive(sn, timeout):
+    t = time.time()
+    while time.time() - t < timeout:
+        p = daplink_drive(sn)
+        if p:
+            return p
+        time.sleep(0.5)
+    return None
+
+
+def install_daplink(d, image):
+    sn = serial_of(d)
+    usb.util.dispose_resources(d)
+    if not os.path.isfile(image):
+        sys.exit(f"{image} not found (run make, or make install)")
+    drive = wait_drive(sn, 10.0)
+    if drive is None:
+        sys.exit("DAPLink probe found, but not its DAPLINK drive; mount it and retry")
+    i = details(drive)
+    print(f"DAPLink {i.get('Interface Version', '?')} ({i.get('Daplink Mode', '?')} mode), "
+          f"drive {drive}")
+    if i.get("HIC ID", "").lower() not in DAPLINK_HIC_IDS:
+        sys.exit(f"unsupported DAPLink hardware (HIC ID {i.get('HIC ID')})")
+    if i.get("Daplink Mode") != "Interface":
+        sys.exit("DAPLink is in its bootloader (MAINTENANCE): reconnect the probe so\n"
+                 "the interface firmware runs, then retry")
+    if i.get("Automation allowed") != "1":
+        sys.exit("DAPLink refuses bootloader updates while 'Automation allowed' is 0.\n"
+                 f"Create an empty file AUTO_ON.CFG on {drive}, reconnect, and retry.")
+
+    print("copying the hybridlink image to the drive")
+    with open(image, "rb") as f, open(os.path.join(drive, "HYBRID.BIN"), "wb") as o:
+        o.write(f.read())
+        o.flush()
+        os.fsync(o.fileno())
+    # DAPLink writes the image, then remounts the drive
+    t = time.time()
+    while daplink_drive(sn, mount=False) and time.time() - t < 30:
+        time.sleep(0.5)
+    drive = wait_drive(sn, 30.0)
+    if drive is None:
+        sys.exit("the DAPLINK drive did not come back")
+    if os.path.exists(os.path.join(drive, "FAIL.TXT")):
+        sys.exit("DAPLink rejected the image: "
+                 + open(os.path.join(drive, "FAIL.TXT"), errors="replace").read().strip())
+    i = details(drive)
+    if i.get("Bootloader Version") != "0000":
+        sys.exit(f"bootloader not replaced (DETAILS.TXT: {i.get('Bootloader Version')})")
+    print("hybridlink bootloader and application written, restarting the probe")
+    try:
+        open(os.path.join(drive, "START_BL.ACT"), "w").close()
+    except OSError:
+        pass
+    # DAPLink's unique ID embeds the chip UID that hybridlink uses as serial
+    d = find(sn[8:32].upper() if sn and len(sn) == 48 else None, wait=15.0)
+    info(d)
+
+
+def install(sn, installer, app):
+    for f in (installer, app):
+        if not os.path.isfile(f):
+            sys.exit(f"{f} not found (run make, or make install)")
+    d = find(sn)
+    if d.idProduct != BOOT_PID:
+        print("switching the probe to its bootloader")
+        enter_dfu(d)
+        time.sleep(1.0)
+    d = wait_bootloader(sn, 10.0)
+    if d is None:
+        sys.exit("the probe did not show up in its bootloader")
+    kind = "hybridlink" if interfaces(d) == 2 else "ST"
+    print(f"{kind} bootloader found, uploading the installer")
+    st_upload(d, open(installer, "rb").read())
+
+    print("installing the hybridlink bootloader")
+    time.sleep(2.0)
+    d = wait_bootloader(sn, 15.0)
+    if d is None:
+        sys.exit("the probe did not come back; if it stays dark it needs an SWD reflash")
+    if interfaces(d) != 2:
+        # the installer refused (bootloader area read or write protected)
+        # or did not start: run hybridlink under the old bootloader instead
+        print("the probe's bootloader is protected and stays; installing the\n"
+              "application under it")
+        st_upload(d, open(app, "rb").read())
+        time.sleep(2.0)
+        reset_old_version(sn)
+        info(find(sn, wait=8.0))
+        print("hybridlink runs under ST's bootloader: update, set-type and\n"
+              "set-version work as usual; STLinkUpgrade restores ST's firmware")
+        return
+    usb.util.dispose_resources(d)
+    print("hybridlink bootloader running, installing the application")
+    if not dfu_flash(sn, app):
+        sys.exit("dfu-util failed")
+    time.sleep(2.0)
+    reset_old_version(sn)
+    info(find(sn, wait=8.0))
+
+
+# ---- version ---------------------------------------------------------------
+
+MIN_J = 46          # CubeIDE 2.1 refuses older, CubeCLT 1.18 refuses < J45
+
+
+def reset_old_version(sn):
+    """ST's updater leaves the version of the firmware it installed in the
+    configuration page, which hybridlink then reports; after install, an
+    old one (e.g. J32 from an early probe) goes back to the default"""
+    d = find(sn, wait=8.0)
+    o = hl_versions(d)
+    if o and o[1] not in (0xFFFF, 0) and (o[1] >> 6) & 0x3F < MIN_J:
+        print(f"reported version {vstr(o[1])} is too old for ST's tools, "
+              f"using the default {vstr(o[2])}")
+        d.ctrl_transfer(0x40, HL_REQ_SET_VERSION, 0xFFFF, HL_REQ_MAGIC, None, 1000)
+        time.sleep(0.5)
+    usb.util.dispose_resources(d)
+
+
+def set_type(sn, name):
+    if name not in MODES:
+        sys.exit(f"unknown type {name!r}, use one of: {', '.join(MODES)}")
+    m = MODES[name]
+    d = find(sn)
+    if hl_versions(d) is None:
+        sys.exit("the probe is not running the hybridlink application")
+    if hl_mode(d) == m:
+        print(f"already in {MODE_NAMES[m]} mode")
+        return
+    try:
+        d.ctrl_transfer(0x40, HL_REQ_SET_MODE, m, HL_REQ_MAGIC, None, 1000)
+    except usb.core.USBError:
+        pass
+    usb.util.dispose_resources(d)
+    time.sleep(1.0)
+    d = find(sn, wait=8.0)
+    if in_st_bootloader(d):                 # ST's bootloader stays after a reset
+        st_leave(d)
+        time.sleep(1.5)
+        d = find(sn, wait=8.0)
+    got = hl_mode(d)
+    usb.util.dispose_resources(d)
+    if got != m:
+        sys.exit("the probe did not switch")
+    print(f"mode: {MODE_NAMES[m]} (USB {d.idVendor:04x}:{d.idProduct:04x})")
+
+
+def set_version(sn, v):
+    d = find(sn)
+    if is_dap(d):
+        sys.exit("set-version applies to ST-Link mode; switch with set-type stlink first")
+    if d.idProduct != 0x3752 or hl_versions(d) is None:
+        sys.exit("the probe is not running the hybridlink application")
+    d.ctrl_transfer(0x40, HL_REQ_SET_VERSION, v, HL_REQ_MAGIC, None, 1000)
+    usb.util.dispose_resources(d)
+    for _ in range(20):                     # flash erase runs after the request
+        time.sleep(0.05)
+        o = hl_versions(find(sn))
+        if o and o[1] == v:
+            usb.util.dispose_resources(find(sn))
+            return o[0]
+    sys.exit("the probe did not store the version")
+
+
+def st_tool_dirs(pattern_cubeide, pattern_clt):
+    home = os.path.expanduser("~")
+    roots = [home, os.path.join(home, "st"), "/opt/st", "/opt", "/usr/local"]
+    found = []
+    for r in roots:
+        for pat in (pattern_cubeide, pattern_clt):
+            found += glob.glob(os.path.join(r, pat))
+    return sorted(set(found), key=os.path.getmtime, reverse=True)
+
+
+def find_gdbservers():
+    return st_tool_dirs(
+        "*/plugins/com.st.stm32cube.ide.mcu.externaltools.stlink-gdb-server.*/tools/bin/ST-LINK_gdbserver",
+        "*/STLink-gdb-server/bin/ST-LINK_gdbserver")
+
+
+def find_cubeprog(gdbserver):
+    """STM32CubeProgrammer bin directory next to the given gdbserver"""
+    base = gdbserver.split("/plugins/")[0] if "/plugins/" in gdbserver \
+        else os.path.dirname(os.path.dirname(os.path.dirname(gdbserver)))
+    for pat in ("plugins/com.st.stm32cube.ide.mcu.externaltools.cubeprogrammer.*/tools/bin",
+                "STM32CubeProgrammer/bin"):
+        c = glob.glob(os.path.join(base, pat))
+        if c:
+            return sorted(c)[-1]
+    c = st_tool_dirs("*/STM32CubeProgrammer/bin", "STM32CubeProgrammer/bin")
+    return c[0] if c else None
+
+
+def gdbserver_check(gdbserver, cubeprog, sn):
+    """'ok', 'outdated' (runs, but asks for a firmware update), 'refused'
+    (firmware upgrade required) or None if the result is not clear"""
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    args = [gdbserver, "-d", "-i", sn, "-p", str(port)]
+    if cubeprog:
+        args += ["-cp", cubeprog]
+    p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         text=True)
+    result, outdated, out = None, False, []
+    t = time.time()
+    try:
+        for line in p.stdout:
+            out.append(line.rstrip())
+            if "upgrade required" in line:
+                result = "refused"
+                break
+            if "update available" in line:
+                outdated = True
+            if "Waiting for debugger connection" in line:
+                result = "outdated" if outdated else "ok"
+                break
+            if time.time() - t > 20:
+                break
+    finally:
+        p.kill()
+        p.wait()
+    return result, out
+
+
+def auto_version(sn, gdbserver):
+    """raise the reported version until no installed gdbserver refuses it or
+    asks for a firmware update; never lowers it"""
+    servers = [gdbserver] if gdbserver else find_gdbservers()
+    if not servers:
+        sys.exit("no ST-LINK_gdbserver found, pass --gdbserver")
+    d = find(sn)
+    o = hl_versions(d)
+    usb.util.dispose_resources(d)
+    if o is None:
+        sys.exit("the probe is not running the hybridlink application")
+    v = o[0]
+    for g in servers:
+        cp = find_cubeprog(g)
+        print(f"checking {g}")
+        while True:
+            for _ in range(3):              # the probe may still be busy
+                r, out = gdbserver_check(g, cp, sn)
+                if r:
+                    break
+                time.sleep(1.0)
+            if r is None:
+                print("\n".join("  | " + l for l in out[-4:] if l.strip()))
+                print("  skipped: could not run it against the probe")
+                break
+            print(f"  {vstr(v)}: {r}")
+            if r == "ok":
+                break
+            if ((v >> 6) & 0x3F) == 63:
+                sys.exit("  gave up at J63")
+            v = set_version(sn, v + (1 << 6))
+    print(f"reported version: {vstr(v)}")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("action", choices=("info", "dfu", "update", "install", "set-type",
+                                       "set-version"))
+    ap.add_argument("arg", nargs="?",
+                    help="image for update, stlink|dap for set-type, version for set-version")
+    ap.add_argument("--serial")
+    ap.add_argument("--app", default=None,
+                    help="application installed by install (default app.bin)")
+    ap.add_argument("--gdbserver", help="ST-LINK_gdbserver used by set-version auto")
+    a = ap.parse_args()
+    if a.action == "install":
+        dl = [x for x in daplinks() if a.serial in (None, serial_of(x))]
+        if dl:
+            install_daplink(dl[0], a.arg or image_path("hybridlink-daplink.bin"))
+            return
+    d = find(a.serial)
+    sn = d.serial_number
+    if a.action == "info":
+        info(d)
+        return
+    if a.action == "install":
+        usb.util.dispose_resources(d)
+        install(sn, a.arg or image_path("installer.bin"), a.app or image_path("app.bin"))
+        return
+    if a.action == "set-type":
+        usb.util.dispose_resources(d)
+        if not a.arg:
+            sys.exit("set-type needs stlink or dap")
+        set_type(sn, a.arg)
+        return
+    if a.action == "set-version":
+        usb.util.dispose_resources(d)
+        if not a.arg:
+            sys.exit("set-version needs V2J<n>M<n>, default or auto")
+        if a.arg == "auto":
+            auto_version(sn, a.gdbserver)
+        else:
+            v = 0xFFFF if a.arg == "default" else vparse(a.arg)
+            print(f"reported version: {vstr(set_version(sn, v))}")
+        return
+    if a.action == "update":
+        a.arg = a.arg or image_path("app.bin")
+        if not os.path.isfile(a.arg):
+            sys.exit(f"{a.arg} not found (run make, or make install)")
+    if d.idProduct != BOOT_PID:
+        enter_dfu(d)
+        time.sleep(1.0)
+    usb.util.dispose_resources(d)
+    if a.action == "dfu":
+        return
+    d = wait_bootloader(sn, 10.0)
+    if d is None:
+        sys.exit("the probe did not show up in its bootloader")
+    if interfaces(d) == 1:                  # hybridlink under ST's bootloader
+        st_upload(d, open(a.arg, "rb").read())
+        print(f"  {os.path.basename(a.arg)} written")
+    else:
+        usb.util.dispose_resources(d)
+        if not dfu_flash(sn, a.arg):
+            sys.exit(1)
+    time.sleep(1.0)                         # wait for the application
+    t = time.time()
+    while time.time() - t < 8.0:
+        p = [x for x in usb.core.find(find_all=True)
+             if x.idVendor in (ST_VID, 0x0D28) and x.idProduct != BOOT_PID
+             and serial_of(x) == sn]
+        if p:
+            usb.util.dispose_resources(p[0])
+            return
+        time.sleep(0.2)
+    sys.exit("the probe did not start the application")
+
+
+if __name__ == "__main__":
+    main()
