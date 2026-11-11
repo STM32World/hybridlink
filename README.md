@@ -1,5 +1,12 @@
 # hybridlink
 
+> [!WARNING]
+> hybridlink is work in progress and has not been tested enough yet. It
+> does not ship on production Jolt Connect or Streamline Connect probes yet
+> (it will soon). Converting a probe now, over USB or SWD, is entirely at
+> your own risk: a failed or interrupted install can leave a probe that
+> needs an SWD reflash, and going back to DAPLink always needs SWD.
+
 Open-source multi-mode debug probe firmware, written from scratch on top of
 [TinyUSB](lib/tinyusb). One firmware, several probe personalities selected
 at run time:
@@ -9,9 +16,9 @@ at run time:
 * **CMSIS-DAP mode**: DAPLink compatible CMSIS-DAP v2, for targets ST's
   tools do not cover, such as the RP2350
 
-See [Probe modes](#probe-modes). hybridlink is the default firmware of the
-[Jolt Connect](https://stm32world.com/wiki/Jolt_Connect) and the Streamline
-Connect, whose hardware matches the ST-Link found on early Nucleo boards
+See [Probe modes](#probe-modes). hybridlink is to become the default
+firmware of the [Jolt Connect](https://stm32world.com/wiki/Jolt_Connect) and
+the Streamline Connect, whose hardware matches the ST-Link found on early Nucleo boards
 (STM32F103CB, 8 MHz crystal). Everything outside `port/` and `boards/` is
 portable, so other probe MCUs can follow.
 
