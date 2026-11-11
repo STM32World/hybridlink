@@ -105,15 +105,17 @@ def vparse(s):
 
 
 def hl_versions(d):
-    """(reported, stored, default, fw major, fw minor) or None if not hybridlink"""
+    """(reported, stored, default, fw version string) or None if not
+    hybridlink. Firmware before 0.5.1 sends no patch level."""
     try:
-        r = bytes(d.ctrl_transfer(0xC0, HL_REQ_GET_VERSION, 0, HL_REQ_MAGIC, 8, 1000))
+        r = bytes(d.ctrl_transfer(0xC0, HL_REQ_GET_VERSION, 0, HL_REQ_MAGIC, 9, 1000))
     except usb.core.USBError:
         return None
-    if len(r) != 8:
+    if len(r) not in (8, 9):
         return None
+    fw = f"{r[6]}.{r[7]}" + (f".{r[8]}" if len(r) == 9 else "")
     return (int.from_bytes(r[0:2], "big"), int.from_bytes(r[2:4], "big"),
-            int.from_bytes(r[4:6], "big"), r[6], r[7])
+            int.from_bytes(r[4:6], "big"), fw)
 
 
 def hl_mode(d):
@@ -131,7 +133,7 @@ def info(d):
         print(f"mode     {MODE_NAMES.get(m, m)}")
     if is_dap(d):
         o = hl_versions(d)
-        print(f"firmware hybridlink {o[3]}.{o[4]} (USB {d.idVendor:04x}:{d.idProduct:04x})")
+        print(f"firmware hybridlink {o[3]} (USB {d.idVendor:04x}:{d.idProduct:04x})")
         return
     v = cmd(d, [0xF1, 0x80], 6)
     ver = (v[0] << 8) | v[1]
@@ -140,7 +142,7 @@ def info(d):
     o = hl_versions(d) if d.idProduct == 0x3752 else None
     if o:
         src = "default" if o[1] in (0xFFFF, 0) else "configuration page"
-        print(f"firmware hybridlink {o[3]}.{o[4]}, version from {src}, "
+        print(f"firmware hybridlink {o[3]}, version from {src}, "
               f"default {vstr(o[2])}")
     print(f"st mode  {cmd(d, [0xF5], 2)[0]}")
     if d.idProduct == 0x3748:

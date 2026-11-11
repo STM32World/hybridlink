@@ -56,7 +56,7 @@ static bool version_valid(uint16_t v)
 bool settings_vendor_request(uint8_t rhport, uint8_t stage, const void *request)
 {
     const tusb_control_request_t *req = request;
-    static uint8_t buf[8];
+    static uint8_t buf[9];
     bool in = req->bmRequestType_bit.direction == TUSB_DIR_IN;
 
     if (req->bmRequestType_bit.recipient != TUSB_REQ_RCPT_DEVICE ||
@@ -75,7 +75,8 @@ bool settings_vendor_request(uint8_t rhport, uint8_t stage, const void *request)
             buf[4] = d >> 8; buf[5] = d;
             buf[6] = HYBRIDLINK_VER_MAJOR;
             buf[7] = HYBRIDLINK_VER_MINOR;
-            n = 8;
+            buf[8] = HYBRIDLINK_VER_PATCH;     /* not sent before 0.5.1 */
+            n = 9;
             break;
         case HL_REQ_GET_MODE:
             if (!in)
