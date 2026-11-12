@@ -57,6 +57,8 @@ void     hal_vcp_set_break(bool on);
 bool     hal_swo_start(uint32_t baud);
 void     hal_swo_stop(void);
 size_t   hal_swo_available(void);
+/* diagnostic words for the host tool (port specific), returns the count */
+unsigned hal_swo_status(uint32_t *w, unsigned max);
 /* contiguous received data without copying; consume what was used.
  * On overrun the oldest data is dropped. */
 size_t   hal_swo_peek(const uint8_t **p);

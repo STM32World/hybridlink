@@ -56,7 +56,7 @@ static bool version_valid(uint16_t v)
 bool settings_vendor_request(uint8_t rhport, uint8_t stage, const void *request)
 {
     const tusb_control_request_t *req = request;
-    static uint8_t buf[9];
+    static uint8_t buf[64] __attribute__((aligned(4)));
     bool in = req->bmRequestType_bit.direction == TUSB_DIR_IN;
 
     if (req->bmRequestType_bit.recipient != TUSB_REQ_RCPT_DEVICE ||
@@ -84,6 +84,11 @@ bool settings_vendor_request(uint8_t rhport, uint8_t stage, const void *request)
             buf[0] = mode;
             buf[1] = (uint8_t)cfg_read16(CFG_MODE_ADDR);
             n = 2;
+            break;
+        case HL_REQ_SWO_STATUS:
+            if (!in)
+                return false;
+            n = 4u * hal_swo_status((uint32_t *)buf, sizeof buf / 4u);
             break;
         case HL_REQ_SET_VERSION:
             if (in || !version_valid(req->wValue))

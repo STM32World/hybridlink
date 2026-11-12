@@ -256,7 +256,7 @@ a configuration page written by ST's updater.
 ### Installing ST firmware (STM32CubeIDE / ST-LinkUpgrade)
 
 The bootloader implements ST's update protocol, so ST's own upgrade tool
-works on an hybridlink probe, from the hybridlink application as well as
+works on a hybridlink probe, from the hybridlink application as well as
 from ST's firmware:
 
 ```bash
@@ -327,8 +327,8 @@ against the probe and raises the J number until none refuses it or asks for
 an update. It never lowers the version. Run it after installing a new
 STM32CubeIDE. `info` shows where the reported version comes from.
 
-The tool uses two vendor control requests of the application (see
-[common/settings.h](common/version_cfg.h)); the rest of the configuration
+The tool uses vendor control requests of the application (see
+[common/settings.h](common/settings.h)); the rest of the configuration
 page is kept when the version is rewritten.
 
 ### Bootloader behaviour
@@ -410,7 +410,8 @@ enter/exit SWD, IDCODEs, status, halt/run/step, system reset, NRST control,
 core register read/write (single and all, incl. FP), debug register
 read/write, 8/16/32-bit memory read/write with and without address increment
 (any length, streamed in chunks), last R/W status (both forms), SWD clock,
-DAP register read/write, AP init/close, SWO trace start/stop/count and the
+DAP register read/write, AP init/close, queued 32-bit AP accesses
+(`RW_MISC_OUT`/`IN`, used by OpenOCD's `stlink-dap` driver), SWO trace start/stop/count and the
 board/capability queries (`56`, `57`, `58`) that current ST tools send.
 
 Not implemented: JTAG (the Jolt Connect only routes SWD), SWIM and the USB
@@ -422,10 +423,13 @@ Tested on a Jolt Connect against an STM32F407:
 
 * STM32CubeProgrammer: probe listed as `V2J48`, connect, read (~136 KB/s),
   program + verify
-* ST-LINK_gdbserver (STM32CubeIDE): connect, reset, step, hardware breakpoint
+* ST-LINK_gdbserver (STM32CubeIDE): connect, reset, step, hardware breakpoint;
+  SWV at 2 MHz (ITM data console and statistical profiling together, PC
+  sampling with timestamps): 1.7 MB of trace decoded without a lost byte
 * OpenOCD 0.12: reset/halt, step, 8/16/32-bit memory access, registers,
   breakpoints, 128 KiB RAM download in 0.9 s at 4 MHz (byte exact from
-  4 MHz down to 100 kHz)
+  4 MHz down to 100 kHz); also with the `stlink-dap` (dap-direct) driver:
+  step, hardware breakpoint, 64 KiB RAM write, verify and read back
 * stlink (st-info / st-flash): probe, read 512 KiB, write + verify
 * bootloader: app -> DFU switch, dfu-util download/upload, return to app
 * ST-LinkUpgrade 3.17.11: installs ST's V2J48M35 on a blank probe and from
@@ -468,10 +472,34 @@ it; an RP2040 would), Windows.
 
 ### SWO notes
 
-The trace endpoint is a stream: full 32-byte packets are fed from a 4 KiB
-receive buffer while the host drains them, a short packet only after 5 ms of
-silence. `GET_TRACE_NB` reports everything not yet delivered, so a host may
-read any amount per poll. If the host polls too slowly the oldest data is
-dropped. OpenOCD 0.12 does not poll trace while blocked in `wait_halt`, so a
-long full-rate burst captured that way gets truncated; that is a host-side
-limit.
+SWO is received as UART/NRZ by USART1 with circular DMA into a 4 KiB
+buffer, up to 4.5 Mbaud (2 Mbaud is what STM32CubeIDE uses by default).
+Hosts read it in two ways, and both are handled:
+
+* polled (ST-LINK_gdbserver, OpenOCD): `GET_TRACE_NB`, then a read of
+  exactly that many bytes. Once a host polls, the probe sends exactly the
+  bytes the last count promised, as 32-byte packets and a short last one.
+  An early short packet would end the host's read too soon and a larger one
+  would overflow it, which STM32CubeIDE reports as *"SWV info, Failed to
+  read data!!!"* (fixed in 0.5.1).
+* streamed (no `GET_TRACE_NB`): full packets as soon as the host takes the
+  previous one, a short packet after 5 ms of silence.
+
+If the host falls more than the buffer behind, the oldest data is dropped.
+OpenOCD 0.12 does not poll trace while it is blocked (`wait_halt`,
+`sleep`), so a long full-rate burst captured that way gets truncated; that
+is a host-side limit.
+
+To see what the probe's receiver is doing, run this while a trace session
+is open:
+
+```bash
+hybridlink swo-status
+```
+
+It shows the bytes received, delivered and dropped, and the UART and DMA
+state. Overflow packets in STM32CubeIDE's SWV views come from the target's
+ITM, not from the probe: the target produces more than the SWO clock
+carries. PC sampling with a timestamp on every packet is the usual cause;
+a higher timestamp prescaler, a coarser sampling resolution or a faster
+SWO clock helps.

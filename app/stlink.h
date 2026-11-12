@@ -13,9 +13,12 @@
 
 void     stlink_init(void);
 /* Memory commands stream their data in chunks of any size:
- *   stlink_out_len: OUT data bytes following a memory write command
+ *   stlink_out_len: OUT data bytes following a command (memory write,
+ *                   RW_MISC_OUT); called exactly once per command
  *   stlink_in_len:  IN reply bytes of a memory read command
- *   stlink_mem_out/in: handle one chunk at byte offset off */
+ *   stlink_mem_out/in: handle one chunk at byte offset off
+ * RW_MISC_OUT data is used in place by the RW_MISC_IN that follows, so
+ * the buffer passed to stlink_mem_out must stay untouched until then. */
 uint32_t stlink_out_len(const uint8_t *cmd);
 uint32_t stlink_in_len(const uint8_t *cmd);
 void     stlink_mem_out(const uint8_t *cmd, uint32_t off, const uint8_t *buf, uint32_t n);

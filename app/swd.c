@@ -433,6 +433,11 @@ void mem_set_ap(uint8_t ap)
     cur_ap = ap;
 }
 
+uint8_t mem_get_ap(void)
+{
+    return cur_ap;
+}
+
 uint8_t mem_ap_init(uint8_t ap)
 {
     mem_set_ap(ap);

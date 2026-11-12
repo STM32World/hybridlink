@@ -49,6 +49,7 @@ void     swd_invalidate(void);
 
 /* MEM-AP accesses on the selected AP */
 void     mem_set_ap(uint8_t ap);
+uint8_t  mem_get_ap(void);
 uint8_t  mem_ap_init(uint8_t ap);
 uint8_t  mem_read32(uint32_t addr, uint32_t *val);
 uint8_t  mem_write32(uint32_t addr, uint32_t val);

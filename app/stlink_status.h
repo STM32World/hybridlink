@@ -87,6 +87,8 @@
 #define DBG_APIV2_WRITEMEM_16BIT    0x48
 #define DBG_APIV2_INIT_AP           0x4B
 #define DBG_APIV2_CLOSE_AP_DBG      0x4C
+#define DBG_APIV2_RW_MISC_OUT       0x51
+#define DBG_APIV2_RW_MISC_IN        0x52
 #define DBG_WRITEMEM_32BIT_NOINC    0x50
 #define DBG_READMEM_32BIT_NOINC     0x54
 #define DBG_APIV2_BOARD_INFO        0x56

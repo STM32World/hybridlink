@@ -522,6 +522,22 @@ size_t hal_swo_available(void)
     return n;
 }
 
+/* on, received, consumed, dropped, USART SR, BRR, CR1, CR3, DMA CCR,
+ * CNDTR, GPIOA CRH, AFIO MAPR */
+unsigned hal_swo_status(uint32_t *w, unsigned max)
+{
+    uint32_t v[] = { swo_on, swo_on ? swo_head() : 0, swo_tail, swo_dropped,
+                     USART_SR(USART1_BASE), USART_BRR(USART1_BASE),
+                     USART_CR1(USART1_BASE), USART_CR3(USART1_BASE),
+                     DMA1_CCR(5), DMA1_CNDTR(5), GPIO_CRH(GPIOA_BASE), AFIO_MAPR };
+    unsigned n = sizeof v / sizeof v[0];
+    if (n > max)
+        n = max;
+    for (unsigned i = 0; i < n; i++)
+        w[i] = v[i];
+    return n;
+}
+
 size_t hal_swo_peek(const uint8_t **p)
 {
     size_t n = hal_swo_available();

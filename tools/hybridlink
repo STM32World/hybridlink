@@ -21,6 +21,11 @@
                                       reports; "auto" raises it until the
                                       installed ST-LINK_gdbservers neither
                                       refuse it nor ask for an update
+  hybridlink swo-status [--serial SN]
+                                      show the probe's SWO receiver: bytes
+                                      received / delivered / dropped and the
+                                      UART and DMA state (run it while a
+                                      trace session is open)
 
 Images are looked up in ../build next to this script (a source tree) and
 then in ../share/hybridlink (after make install).
@@ -38,6 +43,7 @@ MODE_NAMES = {0: "ST-Link", 1: "CMSIS-DAP"}
 # vendor control requests of the hybridlink application (common/settings.h)
 HL_REQ_GET_VERSION = 0x01
 HL_REQ_SET_VERSION = 0x02
+HL_REQ_SWO_STATUS = 0x06
 HL_REQ_GET_MODE = 0x03
 HL_REQ_SET_MODE = 0x04
 HL_REQ_ENTER_DFU = 0x05
@@ -155,7 +161,9 @@ def info(d):
 
 
 def enter_dfu(d):
-    if is_dap(d):
+    # the vendor request works in every hybridlink mode, also when the
+    # ST-Link command stream is out of step; ST's firmware only knows F9
+    if hl_versions(d) is not None:
         try:
             d.ctrl_transfer(0x40, HL_REQ_ENTER_DFU, 0, HL_REQ_MAGIC, None, 1000)
         except usb.core.USBError:
@@ -646,10 +654,34 @@ def auto_version(sn, gdbserver):
     print(f"reported version: {vstr(v)}")
 
 
+def swo_status(d):
+    """the probe's SWO receiver state (firmware 0.5.3 and later)"""
+    try:
+        r = bytes(d.ctrl_transfer(0xC0, HL_REQ_SWO_STATUS, 0, HL_REQ_MAGIC, 64, 1000))
+    except usb.core.USBError:
+        sys.exit("the probe's firmware does not report the SWO state (0.5.3 or later)")
+    w = [int.from_bytes(r[i:i + 4], "little") for i in range(0, len(r) - 3, 4)]
+    if len(w) < 4:
+        sys.exit("unexpected SWO status reply")
+    on, head, tail, dropped = w[:4]
+    print(f"swo      {'receiving' if on else 'off'}")
+    print(f"received {head} bytes, delivered {tail}, waiting {head - tail if on else 0}, "
+          f"dropped {dropped}")
+    if len(w) >= 12:                        # STM32F1 port: register snapshot
+        sr, brr, cr1, cr3, ccr, cndtr, crh, mapr = w[4:12]
+        errs = [n for b, n in ((3, "overrun"), (2, "noise"), (1, "framing"))
+                if sr & (1 << b)]
+        print(f"uart     SR {sr:04x} ({', '.join(errs) or 'no errors'}), BRR {brr:x}, "
+              f"CR1 {cr1:04x}, CR3 {cr3:04x}")
+        print(f"dma      CCR {ccr:x}{' (enabled)' if ccr & 1 else ' (disabled)'}, "
+              f"CNDTR {cndtr}")
+        print(f"pins     GPIOA_CRH {crh:08x}, AFIO_MAPR {mapr:08x}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("action", choices=("info", "dfu", "update", "install", "set-type",
-                                       "set-version"))
+                                       "set-version", "swo-status"))
     ap.add_argument("arg", nargs="?",
                     help="image for update, stlink|dap for set-type, version for set-version")
     ap.add_argument("--serial")
@@ -666,6 +698,9 @@ def main():
     sn = d.serial_number
     if a.action == "info":
         info(d)
+        return
+    if a.action == "swo-status":
+        swo_status(d)
         return
     if a.action == "install":
         usb.util.dispose_resources(d)

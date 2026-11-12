@@ -156,9 +156,80 @@ static bool mem_aligned(const uint8_t *c, unsigned size)
     return size == 1 || !(a & (size - 1u));
 }
 
+/* ---- queued 32-bit accesses (RW_MISC) ------------------------------------
+ * OpenOCD batches AP accesses with these from V2J32 on. RW_MISC_OUT carries
+ * n items: n opcode bytes (padded to 4), then one 32-bit value per item.
+ * RW_MISC_IN runs the batch and returns one 32-bit result per item (the
+ * data for a read), then one 32-bit status per item. */
+
+#define MISC_ADDRESS    1
+#define MISC_WRITE      2
+#define MISC_READ       3
+#define MISC_APNUM      5
+#define MISC_MAX        256u
+
+static const uint8_t *misc_buf;         /* OUT data, valid until next cmd */
+static uint32_t misc_items;
+
+static bool is_misc(const uint8_t *c, uint8_t op)
+{
+    return c[0] == STLINK_DEBUG_COMMAND && c[1] == op;
+}
+
+static uint32_t misc_out_len(uint32_t items)
+{
+    return ((items + 3u) & ~3u) + 4u * items;
+}
+
+static uint32_t misc_run(uint8_t *r)
+{
+    uint32_t items = misc_items;
+    misc_items = 0;
+    if (!misc_buf || !items) {
+        misc_buf = NULL;
+        return reply_status(r, STLINK_FALSE);
+    }
+    /* move the request to the top of the buffer, results grow from 0 */
+    uint32_t in_len = misc_out_len(items);
+    uint8_t *in = r + STLINK_DATA_MAX - in_len;
+    memmove(in, misc_buf, in_len);
+    misc_buf = NULL;
+    const uint8_t *ops = in, *vals = in + ((items + 3u) & ~3u);
+    uint8_t *res = r, *sts = r + 4u * items;
+
+    uint8_t ap = mem_get_ap(), st = STLINK_OK;
+    uint32_t addr = 0;
+    for (uint32_t i = 0; i < items; i++) {
+        uint32_t v = get32(vals + 4u * i), out = 0;
+        if (st == STLINK_OK) {
+            switch (ops[i]) {
+            case MISC_ADDRESS:  addr = v;                           break;
+            case MISC_WRITE:    st = mem_write32(addr, v);          break;
+            case MISC_READ:     st = mem_read32(v, &out);           break;
+            case MISC_APNUM:    mem_set_ap((uint8_t)v);             break;
+            default:            st = STLINK_FALSE;                  break;
+            }
+            if (st != STLINK_OK && st != STLINK_FALSE)
+                swd_clear_errors();
+            last_status = st;
+        }
+        put32(res + 4u * i, out);
+        put32(sts + 4u * i, st);        /* the rest fail after an error */
+    }
+    mem_set_ap(ap);
+    return 8u * items;
+}
+
+/* called once for every command received */
 uint32_t stlink_out_len(const uint8_t *c)
 {
     bool wr, inc;
+    if (!is_misc(c, DBG_APIV2_RW_MISC_IN)) {
+        misc_buf = NULL;                /* a batch is only valid for the */
+        misc_items = 0;                 /* command right after it        */
+    }
+    if (is_misc(c, DBG_APIV2_RW_MISC_OUT))
+        return misc_out_len(get32(c + 2));
     return mem_size(c, &wr, &inc) && wr ? get16(c + 6) : 0;
 }
 
@@ -198,6 +269,16 @@ void stlink_mem_out(const uint8_t *c, uint32_t off, const uint8_t *buf, uint32_t
     bool wr, inc;
     unsigned size = mem_size(c, &wr, &inc);
 
+    if (is_misc(c, DBG_APIV2_RW_MISC_OUT)) {
+        /* kept in place: RW_MISC_IN, which has no data phase, runs it.
+         * Larger batches than one chunk are refused (OpenOCD sends <= 64) */
+        uint32_t items = get32(c + 2);
+        bool ok = off == 0 && items && items <= MISC_MAX && n == misc_out_len(items);
+        misc_buf = ok ? buf : NULL;
+        misc_items = ok ? items : 0;
+        return;
+    }
+
     if (off == 0)
         last_status = STLINK_OK;
     if (last_status != STLINK_OK)
@@ -219,6 +300,9 @@ static uint32_t debug_command(const uint8_t *c, uint8_t *r)
     uint32_t v, addr = get32(c + 2);
 
     switch (c[1]) {
+    case DBG_APIV2_RW_MISC_IN:
+        return misc_run(r);
+
     case DBG_APIV1_ENTER:
     case DBG_APIV2_ENTER:
         if (c[2] != DBG_ENTER_SWD)
