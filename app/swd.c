@@ -485,10 +485,17 @@ uint8_t mem_write32(uint32_t addr, uint32_t val)
     return mem_write(addr, (const uint8_t *)&val, 4, 4, true);
 }
 
+static uint32_t csw_high = CSW_DEFAULT;
+
+void mem_set_csw_high(uint32_t high)
+{
+    csw_high = high ? (high & 0xFFFFFF00u) : CSW_DEFAULT;
+}
+
 static uint32_t csw_for(unsigned size, bool inc)
 {
     uint32_t s = size == 1 ? CSW_SIZE8 : (size == 2 ? CSW_SIZE16 : CSW_SIZE32);
-    return CSW_DEFAULT | s | (inc ? CSW_INC : 0);
+    return csw_high | s | (inc ? CSW_INC : 0);
 }
 
 uint8_t mem_read(uint32_t addr, uint8_t *buf, uint32_t len, unsigned size, bool inc)

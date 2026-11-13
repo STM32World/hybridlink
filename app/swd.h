@@ -49,6 +49,9 @@ void     swd_invalidate(void);
 
 /* MEM-AP accesses on the selected AP */
 void     mem_set_ap(uint8_t ap);
+/* CSW bits 31..8 for the following memory accesses (0 = the default:
+ * DbgSwEnable, MasterDebug, HPROT1); size and auto increment are added */
+void     mem_set_csw_high(uint32_t high);
 uint8_t  mem_get_ap(void);
 uint8_t  mem_ap_init(uint8_t ap);
 uint8_t  mem_read32(uint32_t addr, uint32_t *val);

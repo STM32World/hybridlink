@@ -150,6 +150,17 @@ static unsigned mem_size(const uint8_t *c, bool *write, bool *inc)
     }
 }
 
+/* Memory commands name their access port in byte 8 and CSW bits 31..8 in
+ * bytes 9..11 (OpenOCD's stlink-dap and hla drivers; other hosts send
+ * zeros, i.e. AP 0 with the default CSW). On a chip with several APs (STM32H7:
+ * AP0 AXI, AP1 AHB, AP2 debug APB) ignoring them sends the access to
+ * whatever AP was opened last. */
+static void mem_select(const uint8_t *c)
+{
+    mem_set_ap(c[8]);
+    mem_set_csw_high(((uint32_t)c[9] << 8) | ((uint32_t)c[10] << 16) | ((uint32_t)c[11] << 24));
+}
+
 static bool mem_aligned(const uint8_t *c, unsigned size)
 {
     uint32_t a = get32(c + 2) | get16(c + 6);
@@ -261,6 +272,7 @@ void stlink_mem_in(const uint8_t *c, uint32_t off, uint8_t *buf, uint32_t n)
         last_status = STLINK_SWD_AP_ERROR;
         return;
     }
+    mem_select(c);
     last_status = mem_read(get32(c + 2) + (inc ? off : 0), buf, n, size, inc);
 }
 
@@ -288,6 +300,7 @@ void stlink_mem_out(const uint8_t *c, uint32_t off, const uint8_t *buf, uint32_t
         return;
     }
     n &= ~(uint32_t)(size - 1u);
+    mem_select(c);
     if (n)
         last_status = mem_write(get32(c + 2) + (inc ? off : 0), buf, n, size, inc);
 }
@@ -298,6 +311,20 @@ static uint32_t debug_command(const uint8_t *c, uint8_t *r)
 {
     uint8_t st;
     uint32_t v, addr = get32(c + 2);
+
+    /* core debug (halt, registers, reset, debug register access) is on
+     * AP 0 with the default CSW, whatever a memory command used before;
+     * the DAP level commands keep the AP state they manage themselves */
+    switch (c[1]) {
+    case DBG_APIV2_RW_MISC_OUT: case DBG_APIV2_RW_MISC_IN:
+    case DBG_APIV2_INIT_AP: case DBG_APIV2_CLOSE_AP_DBG:
+    case DBG_APIV2_READ_DAP_REG: case DBG_APIV2_WRITE_DAP_REG:
+        break;
+    default:
+        mem_set_ap(0);
+        mem_set_csw_high(0);
+        break;
+    }
 
     switch (c[1]) {
     case DBG_APIV2_RW_MISC_IN:
