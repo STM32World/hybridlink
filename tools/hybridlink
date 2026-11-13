@@ -13,7 +13,7 @@
                                       over USB and install the application;
                                       a protected ST bootloader stays and the
                                       application runs under it
-  hybridlink set-type stlink | dap [--serial SN]
+  hybridlink set-type stlink | dap | wch [--serial SN]
                                       switch between ST-Link and CMSIS-DAP
                                       (DAPLink compatible) mode
   hybridlink set-version V2J49M36 | default | auto [--serial SN]
@@ -36,9 +36,11 @@ import usb.core, usb.util
 ST_VID = 0x0483
 ST_PIDS = (0x3748, 0x374A, 0x374B, 0x3752)
 DAP_IDS = ((0x0D28, 0x0204),)            # hybridlink in CMSIS-DAP mode
+WCH_IDS = ((0x1A86, 0x8010),)            # hybridlink in WCH-Link mode
+HL_IDS = DAP_IDS + WCH_IDS               # non-ST identities
 DFU_ID = "0483:3748"
-MODES = {"stlink": 0, "dap": 1, "daplink": 1, "cmsis-dap": 1}
-MODE_NAMES = {0: "ST-Link", 1: "CMSIS-DAP"}
+MODES = {"stlink": 0, "dap": 1, "daplink": 1, "cmsis-dap": 1, "wch": 2, "wchlink": 2}
+MODE_NAMES = {0: "ST-Link", 1: "CMSIS-DAP", 2: "WCH-Link"}
 
 # vendor control requests of the hybridlink application (common/settings.h)
 HL_REQ_GET_VERSION = 0x01
@@ -68,13 +70,13 @@ def find(serial, wait=0.0):
         for d in usb.core.find(find_all=True):
             ids = (d.idVendor, d.idProduct)
             st = d.idVendor == ST_VID and d.idProduct in ST_PIDS
-            if not st and ids not in DAP_IDS:
+            if not st and ids not in HL_IDS:
                 continue
             sn = serial_of(d, errors)
             if serial is not None and sn != serial:
                 continue
             if not st and hl_versions(d) is None:
-                continue                    # some other CMSIS-DAP probe
+                continue                    # some other CMSIS-DAP probe / a WCH-Link
             return d
         if time.time() - t >= wait:
             if errors:
@@ -87,7 +89,8 @@ def find(serial, wait=0.0):
 
 
 def is_dap(d):
-    return (d.idVendor, d.idProduct) in DAP_IDS
+    """hybridlink in a mode without the ST protocol (CMSIS-DAP, WCH-Link)"""
+    return (d.idVendor, d.idProduct) in HL_IDS
 
 
 def cmd(d, b, n=0):
@@ -683,7 +686,7 @@ def main():
     ap.add_argument("action", choices=("info", "dfu", "update", "install", "set-type",
                                        "set-version", "swo-status"))
     ap.add_argument("arg", nargs="?",
-                    help="image for update, stlink|dap for set-type, version for set-version")
+                    help="image for update, stlink|dap|wch for set-type, version for set-version")
     ap.add_argument("--serial")
     ap.add_argument("--app", default=None,
                     help="application installed by install (default app.bin)")
@@ -709,7 +712,7 @@ def main():
     if a.action == "set-type":
         usb.util.dispose_resources(d)
         if not a.arg:
-            sys.exit("set-type needs stlink or dap")
+            sys.exit("set-type needs stlink, dap or wch")
         set_type(sn, a.arg)
         return
     if a.action == "set-version":
@@ -746,7 +749,7 @@ def main():
     t = time.time()
     while time.time() - t < 8.0:
         p = [x for x in usb.core.find(find_all=True)
-             if x.idVendor in (ST_VID, 0x0D28) and x.idProduct != BOOT_PID
+             if x.idVendor in (ST_VID, 0x0D28, 0x1A86) and x.idProduct != BOOT_PID
              and serial_of(x) == sn]
         if p:
             usb.util.dispose_resources(p[0])

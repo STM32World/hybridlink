@@ -73,6 +73,18 @@
 #define DAP_USB_PRODUCT     "hybridlink CMSIS-DAP"
 #endif
 
+/* WCH-Link mode: WCH's hosts (wlink, probe-rs, WCH OpenOCD, MounRiver)
+ * find the link by VID/PID */
+#ifndef WCH_USB_VID
+#define WCH_USB_VID         0x1A86
+#endif
+#ifndef WCH_USB_PID
+#define WCH_USB_PID         0x8010
+#endif
+#ifndef WCH_USB_PRODUCT
+#define WCH_USB_PRODUCT     "hybridlink WCH-Link compatible"
+#endif
+
 /* keep the string and the numbers in step; make dist / releases use the
  * string, the tool reads the numbers from the probe */
 #define HYBRIDLINK_VERSION  "0.5.3"

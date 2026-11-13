@@ -1,5 +1,6 @@
 /*
- * hybridlink application: ST-Link/V2-1 compatible or CMSIS-DAP debug probe
+ * hybridlink application: ST-Link/V2-1 compatible, CMSIS-DAP or WCH-Link
+ * compatible debug probe
  * (SWD + virtual COM port + SWO) on TinyUSB. The mode is a setting in the
  * configuration page (see settings.h) and is fixed for one boot.
  * SPDX-License-Identifier: MIT
@@ -10,9 +11,11 @@
 #include "settings.h"
 #include "stlink.h"
 #include "dap.h"
+#include "wch.h"
 
 void stlink_usb_task(void);
 void dap_usb_task(void);
+void wch_usb_task(void);
 void vcp_init(void);
 void vcp_task(void);
 
@@ -32,9 +35,12 @@ int main(void)
 {
     hal_init();
     settings_init();
-    bool dap = settings_mode() == MODE_DAP;
+    enum probe_mode mode = settings_mode();
+    bool dap = mode == MODE_DAP, wch = mode == MODE_WCH;
     if (dap)
         dap_init();
+    else if (wch)
+        wch_init();
     else
         stlink_init();
     vcp_init();
@@ -50,6 +56,8 @@ int main(void)
         tud_task();
         if (dap)
             dap_usb_task();
+        else if (wch)
+            wch_usb_task();
         else
             stlink_usb_task();
         vcp_task();
@@ -57,7 +65,7 @@ int main(void)
         enum settings_restart r = settings_restart_requested();
         if (r != RESTART_NONE)
             restart(r == RESTART_DFU);
-        if (!dap && stlink_bootloader_requested())
+        if (!dap && !wch && stlink_bootloader_requested())
             restart(true);
     }
 }

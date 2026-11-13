@@ -47,7 +47,7 @@ bool rvswd_raw_request(uint8_t rhport, uint8_t stage, const void *request);
 
 #define CFG_MODE_ADDR       (CFG_BASE + CFG_SIZE - 4u)
 
-enum probe_mode { MODE_STLINK = 0, MODE_DAP = 1, MODE_COUNT };
+enum probe_mode { MODE_STLINK = 0, MODE_DAP = 1, MODE_WCH = 2, MODE_COUNT };
 
 #define STLINK_VERSION_DEFAULT \
     ((STLINK_VER_STLINK << 12) | (STLINK_VER_JTAG << 6) | STLINK_VER_MSD)

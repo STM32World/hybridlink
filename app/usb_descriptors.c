@@ -5,6 +5,10 @@
  *   IF0 vendor debug: EP1 OUT/IN (64), EP2 IN trace (32)
  *   IF1/IF2 CDC ACM VCP (IAD): EP4 IN notify, EP5 OUT/IN data
  *
+ * WCH-Link mode, laid out like WCH-Link firmware 2.12:
+ *   IF0 vendor FF/80/55: EP1 OUT/IN commands, EP2 OUT/IN data (64)
+ *   IF1/IF2 CDC ACM VCP with 16-byte data endpoints (PMA space)
+ *
  * CMSIS-DAP mode:
  *   IF0 vendor "CMSIS-DAP v2": EP1 OUT/IN bulk (64)
  *   IF1/IF2 CDC ACM VCP, as above
@@ -21,11 +25,16 @@
 
 extern const usbd_class_driver_t stlink_driver;
 extern const usbd_class_driver_t dap_driver;
+extern const usbd_class_driver_t wch_driver;
 
 const usbd_class_driver_t *usbd_app_driver_get_cb(uint8_t *count)
 {
     *count = 1;
-    return settings_mode() == MODE_DAP ? &dap_driver : &stlink_driver;
+    switch (settings_mode()) {
+    case MODE_DAP: return &dap_driver;
+    case MODE_WCH: return &wch_driver;
+    default:       return &stlink_driver;
+    }
 }
 
 /* ---- device ----------------------------------------------------------- */
@@ -64,16 +73,36 @@ static const tusb_desc_device_t dap_dev = {
     .bNumConfigurations = 1,
 };
 
+static const tusb_desc_device_t wch_dev = {
+    .bLength            = sizeof(tusb_desc_device_t),
+    .bDescriptorType    = TUSB_DESC_DEVICE,
+    .bcdUSB             = 0x0200,
+    .bDeviceClass       = TUSB_CLASS_MISC,
+    .bDeviceSubClass    = MISC_SUBCLASS_COMMON,
+    .bDeviceProtocol    = MISC_PROTOCOL_IAD,
+    .bMaxPacketSize0    = CFG_TUD_ENDPOINT0_SIZE,
+    .idVendor           = WCH_USB_VID,
+    .idProduct          = WCH_USB_PID,
+    .bcdDevice          = 0x0212,           /* WCH-Link firmware 2.12 */
+    .iManufacturer      = 1,
+    .iProduct           = 2,
+    .iSerialNumber      = 3,
+    .bNumConfigurations = 1,
+};
+
 const uint8_t *tud_descriptor_device_cb(void)
 {
-    return settings_mode() == MODE_DAP ? (const uint8_t *)&dap_dev
-                                       : (const uint8_t *)&stlink_dev;
+    switch (settings_mode()) {
+    case MODE_DAP: return (const uint8_t *)&dap_dev;
+    case MODE_WCH: return (const uint8_t *)&wch_dev;
+    default:       return (const uint8_t *)&stlink_dev;
+    }
 }
 
 /* ---- configuration ---------------------------------------------------- */
 
 /* virtual COM port, laid out exactly like the genuine ST-Link one */
-#define VCP_DESC(str_ctrl, str_data) \
+#define VCP_DESC(str_ctrl, str_data, size) \
     8, TUSB_DESC_INTERFACE_ASSOCIATION, ITF_CDC_CTRL, 2, TUSB_CLASS_CDC, \
        CDC_COMM_SUBCLASS_ABSTRACT_CONTROL_MODEL, CDC_COMM_PROTOCOL_ATCOMMAND, str_ctrl, \
     9, TUSB_DESC_INTERFACE, ITF_CDC_CTRL, 0, 1, TUSB_CLASS_CDC, \
@@ -84,8 +113,8 @@ const uint8_t *tud_descriptor_device_cb(void)
     5, TUSB_DESC_CS_INTERFACE, CDC_FUNC_DESC_UNION, ITF_CDC_CTRL, ITF_CDC_DATA, \
     7, TUSB_DESC_ENDPOINT, EP_CDC_NOTIF, TUSB_XFER_INTERRUPT, U16_TO_U8S_LE(8), 16, \
     9, TUSB_DESC_INTERFACE, ITF_CDC_DATA, 0, 2, TUSB_CLASS_CDC_DATA, 0, 0, str_data, \
-    7, TUSB_DESC_ENDPOINT, EP_CDC_OUT, TUSB_XFER_BULK, U16_TO_U8S_LE(64), 0, \
-    7, TUSB_DESC_ENDPOINT, EP_CDC_IN,  TUSB_XFER_BULK, U16_TO_U8S_LE(64), 0
+    7, TUSB_DESC_ENDPOINT, EP_CDC_OUT, TUSB_XFER_BULK, U16_TO_U8S_LE(size), 0, \
+    7, TUSB_DESC_ENDPOINT, EP_CDC_IN,  TUSB_XFER_BULK, U16_TO_U8S_LE(size), 0
 
 #define STLINK_IF_LEN (9 + 3 * 7)
 #define STLINK_CONFIG_LEN (TUD_CONFIG_DESC_LEN + STLINK_IF_LEN + TUD_CDC_DESC_LEN)
@@ -96,7 +125,7 @@ static const uint8_t stlink_cfg[] = {
     7, TUSB_DESC_ENDPOINT, EP_STLINK_IN,  TUSB_XFER_BULK, U16_TO_U8S_LE(64), 0,
     7, TUSB_DESC_ENDPOINT, EP_STLINK_OUT, TUSB_XFER_BULK, U16_TO_U8S_LE(64), 0,
     7, TUSB_DESC_ENDPOINT, EP_TRACE_IN,   TUSB_XFER_BULK, U16_TO_U8S_LE(32), 0,
-    VCP_DESC(6, 7),
+    VCP_DESC(6, 7, 64),
 };
 TU_VERIFY_STATIC(sizeof(stlink_cfg) == STLINK_CONFIG_LEN, "config length");
 
@@ -108,14 +137,32 @@ static const uint8_t dap_cfg[] = {
     9, TUSB_DESC_INTERFACE, ITF_DAP, 0, 2, 0xFF, 0x00, 0x00, 4,
     7, TUSB_DESC_ENDPOINT, EP_DAP_OUT, TUSB_XFER_BULK, U16_TO_U8S_LE(64), 0,
     7, TUSB_DESC_ENDPOINT, EP_DAP_IN,  TUSB_XFER_BULK, U16_TO_U8S_LE(64), 0,
-    VCP_DESC(6, 7),
+    VCP_DESC(6, 7, 64),
 };
 TU_VERIFY_STATIC(sizeof(dap_cfg) == DAP_CONFIG_LEN, "config length");
+
+#define WCH_IF_LEN (9 + 4 * 7)
+#define WCH_CONFIG_LEN (TUD_CONFIG_DESC_LEN + WCH_IF_LEN + TUD_CDC_DESC_LEN)
+
+static const uint8_t wch_cfg[] = {
+    TUD_CONFIG_DESCRIPTOR(1, 3, 0, WCH_CONFIG_LEN, 0x80, USB_MAX_POWER_MA),
+    9, TUSB_DESC_INTERFACE, ITF_WCH, 0, 4, 0xFF, 0x80, 0x55, 4,
+    7, TUSB_DESC_ENDPOINT, EP_WCH_DATA_IN,  TUSB_XFER_BULK, U16_TO_U8S_LE(64), 0,
+    7, TUSB_DESC_ENDPOINT, EP_WCH_DATA_OUT, TUSB_XFER_BULK, U16_TO_U8S_LE(64), 0,
+    7, TUSB_DESC_ENDPOINT, EP_WCH_CMD_IN,   TUSB_XFER_BULK, U16_TO_U8S_LE(64), 0,
+    7, TUSB_DESC_ENDPOINT, EP_WCH_CMD_OUT,  TUSB_XFER_BULK, U16_TO_U8S_LE(64), 0,
+    VCP_DESC(6, 7, 16),
+};
+TU_VERIFY_STATIC(sizeof(wch_cfg) == WCH_CONFIG_LEN, "config length");
 
 const uint8_t *tud_descriptor_configuration_cb(uint8_t index)
 {
     (void)index;
-    return settings_mode() == MODE_DAP ? dap_cfg : stlink_cfg;
+    switch (settings_mode()) {
+    case MODE_DAP: return dap_cfg;
+    case MODE_WCH: return wch_cfg;
+    default:       return stlink_cfg;
+    }
 }
 
 /* ---- BOS / Microsoft OS 2.0 (CMSIS-DAP mode) -------------------------- */
@@ -193,6 +240,11 @@ static const char *const stlink_strings[] = {
     "ST-Link mass storage", "ST-Link VCP Ctrl", "ST-Link VCP Data",
 };
 
+static const char *const wch_strings[] = {
+    NULL, STLINK_USB_MANUFACTURER, WCH_USB_PRODUCT, NULL, "WCH-Link",
+    NULL, "hybridlink VCP Ctrl", "hybridlink VCP Data",
+};
+
 static const char *const dap_strings[] = {
     NULL, DAP_USB_MANUFACTURER, DAP_USB_PRODUCT, NULL, "CMSIS-DAP v2",
     NULL, "hybridlink VCP Ctrl", "hybridlink VCP Data",
@@ -201,7 +253,9 @@ static const char *const dap_strings[] = {
 const uint16_t *tud_descriptor_string_cb(uint8_t index, uint16_t langid)
 {
     static uint16_t buf[33];
-    const char *const *strings = settings_mode() == MODE_DAP ? dap_strings : stlink_strings;
+    const char *const *strings = settings_mode() == MODE_DAP ? dap_strings
+                               : settings_mode() == MODE_WCH ? wch_strings
+                               : stlink_strings;
     (void)langid;
     if (index == 0) {
         buf[0] = (3u << 8) | 4u;
