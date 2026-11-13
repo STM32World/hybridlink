@@ -74,7 +74,9 @@
 #endif
 
 /* WCH-Link mode: WCH's hosts (wlink, probe-rs, WCH OpenOCD, MounRiver)
- * find the link by VID/PID */
+ * find the link by VID/PID; probe-rs also requires the product string to
+ * be exactly "WCH-Link" (or "WCH_Link"). The manufacturer string stays
+ * ours. */
 #ifndef WCH_USB_VID
 #define WCH_USB_VID         0x1A86
 #endif
@@ -82,7 +84,7 @@
 #define WCH_USB_PID         0x8010
 #endif
 #ifndef WCH_USB_PRODUCT
-#define WCH_USB_PRODUCT     "hybridlink WCH-Link compatible"
+#define WCH_USB_PRODUCT     "WCH-Link"
 #endif
 
 /* keep the string and the numbers in step; make dist / releases use the

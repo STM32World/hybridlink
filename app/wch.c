@@ -241,7 +241,9 @@ uint16_t wch_execute(const uint8_t *q, uint16_t len, uint8_t *r)
     case CMD_RESET:
         if (n < 1)
             return unknown(r);
-        rvdm_reset(false);
+        /* 01 (wlink, MounRiver after download): reset and run;
+         * 02 (OpenOCD after program): reset and halt, it verifies next */
+        rvdm_reset(p[0] == 0x02);
         return reply1(r, CMD_RESET, p[0]);
     case CMD_CHIP_INFO:
         return chip_info(r);

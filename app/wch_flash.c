@@ -172,19 +172,48 @@ static bool write_page(uint32_t addr, const uint8_t *p)
     return ok;
 }
 
-/* option bytes: erase, then program RDPR (and nothing else) */
+/* Option bytes: 8 halfwords from 0x1FFFF800 (RDPR, USER, DATA0/1,
+ * WRPR0..3), each a byte plus its complement. They are read, erased and
+ * written back with only RDPR changed: 0xA5 = unprotected, left erased =
+ * protected. OBWRE (set by the OBKEYR unlock) is kept in every CTLR write:
+ * writing it as 0 drops the option byte write access. */
+#define OB_COUNT 8
+
 static bool option_bytes(bool unprotect)
 {
+    uint16_t ob[OB_COUNT];
     if (!open_session())
         return false;
+    for (unsigned i = 0; i < OB_COUNT; i += 2) {
+        uint32_t w;
+        if (!rd(OB_RDPR + 2 * i, &w)) {
+            close_session();
+            return false;
+        }
+        ob[i] = (uint16_t)w;
+        ob[i + 1] = (uint16_t)(w >> 16);
+    }
     wr(FLASH_OBKEYR, KEY1);
     wr(FLASH_OBKEYR, KEY2);
-    bool ok = ctlr_op(CTLR_OBER | CTLR_OBWRE);
-    if (ok && unprotect) {
-        ok = wr(FLASH_CTLR, CTLR_OBPG | CTLR_OBWRE) &&
-             rvdm_mem_write16(OB_RDPR, RDPR_UNPROTECTED) && wait_idle();
-        wr(FLASH_CTLR, 0);
+    bool ok = wr(FLASH_CTLR, CTLR_OBER | CTLR_OBWRE) &&
+              wr(FLASH_CTLR, CTLR_OBER | CTLR_OBWRE | CTLR_STRT) && wait_idle() &&
+              wr(FLASH_CTLR, CTLR_OBPG | CTLR_OBWRE);
+    for (unsigned i = 0; ok && i < OB_COUNT; i++) {
+        uint16_t v;
+        if (i == 0) {
+            if (!unprotect)
+                continue;                   /* erased RDPR: protected */
+            v = RDPR_UNPROTECTED;
+        } else {
+            /* a valid byte/complement pair is written back, an erased or
+             * broken one is left erased (its default) */
+            if (((ob[i] ^ (ob[i] >> 8)) & 0xFFu) != 0xFFu)
+                continue;
+            v = ob[i] & 0xFFu;
+        }
+        ok = rvdm_mem_write16(OB_RDPR + 2u * i, v) && wait_idle();
     }
+    wr(FLASH_CTLR, 0);
     close_session();
     return ok;
 }
