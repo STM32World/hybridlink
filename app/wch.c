@@ -203,8 +203,9 @@ static uint16_t program(uint8_t sub, uint8_t *r)
     case 0x05:                                  /* flash routine follows */
         wch_flash_routine_upload();
         break;
-    case 0x02: case 0x04: case 0x07:            /* start writing */
-        wch_flash_write_start(wr_addr, wr_len);
+    case 0x02: case 0x07:                       /* start writing */
+    case 0x04:                                  /* ... with verify */
+        wch_flash_write_start(wr_addr, wr_len, sub == 0x04);
         break;
     case 0x08:                                  /* end */
         wch_flash_write_end();

@@ -74,7 +74,7 @@ static uint32_t routine_left;
 static uint32_t base, total, received, acked_at;
 static uint8_t page[PAGE] __attribute__((aligned(4)));
 static uint32_t fill;
-static bool session, was_running, ack_due, failed;
+static bool session, was_running, ack_due, failed, verify;
 static uint32_t saved_cfgr0;
 
 void wch_flash_init(void)
@@ -172,6 +172,17 @@ static bool write_page(uint32_t addr, const uint8_t *p)
     return ok;
 }
 
+static bool verify_page(uint32_t addr, const uint8_t *p)
+{
+    for (uint32_t i = 0; i < PAGE; i += 4) {
+        uint32_t w, v;
+        memcpy(&v, &p[i], 4);
+        if (!rd(addr + i, &w) || w != v)
+            return false;
+    }
+    return true;
+}
+
 /* Option bytes: 8 halfwords from 0x1FFFF800 (RDPR, USER, DATA0/1,
  * WRPR0..3), each a byte plus its complement. They are read, erased and
  * written back with only RDPR changed: 0xA5 = unprotected, left erased =
@@ -234,10 +245,13 @@ void wch_flash_routine_upload(void)
     routine_left = ROUTINE_SIZE;
 }
 
-void wch_flash_write_start(uint32_t addr, uint32_t len)
+void wch_flash_write_start(uint32_t addr, uint32_t len, bool check)
 {
-    if (state == WRITING && received == 0 && base == addr)
-        return;                         /* 02 07 followed by 02 02 / 02 04 */
+    if (state == WRITING && received == 0 && base == (addr & ~(PAGE - 1u))) {
+        verify |= check;                /* 02 07 followed by 02 02 / 02 04 */
+        return;
+    }
+    verify = check;
     base = addr & ~(PAGE - 1u);
     total = ((addr - base) + len + PAGE - 1u) & ~(PAGE - 1u);
     received = acked_at = fill = 0;
@@ -278,12 +292,18 @@ void wch_flash_data(const uint8_t *buf, uint16_t len)
         len -= n;
         received += n;
         if (fill == PAGE) {
-            if (!failed && !write_page(base + received - PAGE, page))
+            uint32_t a = base + received - PAGE;
+            if (!failed && (!write_page(a, page) || (verify && !verify_page(a, page)))) {
                 failed = true;
+                close_session();
+            }
             fill = 0;
         }
     }
-    if (received - acked_at >= ACK_EVERY || received >= total) {
+    /* a failed write is never acknowledged: the host times out with an
+     * error instead of reporting success (the genuine link's error report
+     * is unknown) */
+    if (!failed && (received - acked_at >= ACK_EVERY || received >= total)) {
         acked_at = received;
         ack_due = true;
     }

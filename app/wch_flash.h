@@ -15,7 +15,8 @@ bool wch_flash_mass_erase(void);
 bool wch_flash_protect(void);
 bool wch_flash_unprotect(void);
 void wch_flash_routine_upload(void);            /* swallow the next 512 B */
-void wch_flash_write_start(uint32_t addr, uint32_t len);
+/* check: read every page back (02 04, write with verify) */
+void wch_flash_write_start(uint32_t addr, uint32_t len, bool check);
 void wch_flash_write_end(void);
 bool wch_flash_wants_data(void);
 void wch_flash_data(const uint8_t *buf, uint16_t len);
