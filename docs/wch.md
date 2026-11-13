@@ -45,8 +45,36 @@ Two packet formats are reported:
 
 Speed: BMD reports CH32 working up to ≈1.6 Mbit/s with bit-banging; the
 WCH-Link speed setting offers 400 kHz / 4 MHz / 6 MHz.
-Open points to settle on the bench: target-side parity sense, turnaround
-behaviour when the host releases DIO, long vs short framing per chip.
+
+**Bench result (2026-11-13).** Setup: Jolt Connect on J2 of the CH32V307V-R1,
+with the on-board link's jumpers removed. Test build: `make RVSWD_RAW=1`, a
+bit-level script engine behind HL vendor requests 07/08 (`app/rvswd_raw.c`).
+
+- **The short packet works.** The long packet does not: the target answers it
+  with a few bits only.
+- **Parity is even**, not odd. The host's parity bit makes the count of ones
+  even over `addr<<1|rw` (header) or over the data. Each parity bit is sent
+  twice.
+  - With odd parity the target ignores writes (status reads `1111`) and reads
+    return zeros.
+- **Padding:** 4 zeros, driven by the host, after the header parity.
+- **Write:** after the data and parity, the target answers status `0111`.
+- **Read:** the target sends:
+  - data 32 bits, MSB first;
+  - its even parity bit;
+  - a constant `1`;
+  - status `0111`.
+- **Turnaround:** none is needed. The host releases DIO right after the
+  padding (reads) or the data parity (writes) and samples on the next clocks.
+- **Init:** wake-up (100 clocks with DIO high, then STOP), then dmcontrol =
+  dmactive.
+- **Verified values:**
+  - 0x7F reads 0x30700518.
+  - dmstatus reads 0x00030c82 while running and 0x00000382 after haltreq;
+    resumereq brings 0x00030c82 back.
+- **Speed:** works with no extra delay in the script engine, the fastest it
+  can run. The real driver will be measured with the DWT later.
+- **Not seen yet:** the status nibble for a busy or failed access.
 
 Jolt Connect: SWCLK = PB13, SWDIO driver = PB14 (through series R), sense = PB12.
 The split driver/sense pins suit RVSWD's half-duplex without a turnaround clock

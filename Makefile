@@ -31,6 +31,7 @@ ST_COMPAT ?= 1
 # through the ST protocol (for your own builds; the default only reads back
 # hybridlink images)
 DFU_UPLOAD_ANY ?= 0
+RVSWD_RAW ?= 0
 BOOT_SRC := $(wildcard bootloader/*.c) $(COMMON_SRC) $(TUSB_SRC) $(TUSB)/class/dfu/dfu_device.c
 APP_SRC  := $(wildcard app/*.c) $(COMMON_SRC) $(TUSB_SRC) $(TUSB)/class/cdc/cdc_device.c
 
@@ -47,7 +48,7 @@ $(BUILD)/bootloader/%.o: %.c
 
 $(BUILD)/app/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -Iapp -MMD -c $< -o $@
+	$(CC) $(CFLAGS) -Iapp -DRVSWD_RAW=$(RVSWD_RAW) -MMD -c $< -o $@
 
 # bootloader installer: an application that embeds bootloader.bin
 INST_OBJ := $(patsubst %,$(BUILD)/installer/%.o,$(basename $(PORT_INSTALLER_SRC)))

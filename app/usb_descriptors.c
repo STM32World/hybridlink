@@ -169,6 +169,10 @@ TU_VERIFY_STATIC(sizeof(ms_os_20_desc) == MS_OS_20_DESC_LEN, "MS OS 2.0 length")
 bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage,
                                 tusb_control_request_t const *req)
 {
+#if RVSWD_RAW
+    if (rvswd_raw_request(rhport, stage, req))
+        return true;
+#endif
     if (settings_vendor_request(rhport, stage, req))
         return true;
     if (settings_mode() == MODE_DAP && req->bRequest == MS_OS_20_VENDOR_CODE &&

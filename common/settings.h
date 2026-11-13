@@ -39,7 +39,11 @@
 #define HL_REQ_SET_MODE    0x04
 #define HL_REQ_ENTER_DFU   0x05
 #define HL_REQ_SWO_STATUS  0x06
+#define HL_REQ_RVSWD_RUN   0x07          /* RVSWD_RAW builds only */
+#define HL_REQ_RVSWD_RES   0x08
 #define HL_REQ_MAGIC       0x484C          /* "HL" */
+
+bool rvswd_raw_request(uint8_t rhport, uint8_t stage, const void *request);
 
 #define CFG_MODE_ADDR       (CFG_BASE + CFG_SIZE - 4u)
 
