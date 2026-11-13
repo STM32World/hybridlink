@@ -15,6 +15,9 @@ at run time:
   STM32CubeProgrammer, OpenOCD and the stlink tools
 * **CMSIS-DAP mode**: DAPLink compatible CMSIS-DAP v2, for targets ST's
   tools do not cover, such as the RP2350
+* **WCH-Link mode**: WCH-Link compatible, for WCH's CH32V RISC-V chips over
+  their two-wire RVSWD interface; works with MounRiver Studio, WCH's
+  OpenOCD, wlink and probe-rs
 
 See [Probe modes](#probe-modes). hybridlink is to become the default
 firmware of the [Jolt Connect](https://stm32world.com/wiki/Jolt_Connect) and
@@ -24,6 +27,9 @@ portable, so other probe MCUs can follow.
 
 No ST code is used: no HAL, no CMSIS device headers, no ST libraries.
 The STM32F1 port is written at register level from the reference manual.
+Likewise no WCH code and no Arm CMSIS-DAP reference code: the WCH-Link and
+CMSIS-DAP protocols are written from observation and from the published
+specifications.
 
 The firmware has two parts:
 
@@ -31,7 +37,7 @@ The firmware has two parts:
 |------|---------|---------|
 | bootloader | `0x08000000`, 15 KiB | updater: standard USB DFU and ST's update protocol |
 | configuration page | `0x08003C00`, 1 KiB | written by ST's updater, used by ST firmware only |
-| application | `0x08004000`, up to end of flash | ST-Link/V2-1 probe: SWD, virtual COM port, SWO |
+| application | `0x08004000`, up to end of flash | the probe (ST-Link, CMSIS-DAP or WCH-Link mode): SWD / RVSWD, virtual COM port, SWO |
 
 ## What the host sees
 
@@ -78,9 +84,14 @@ does not negotiate it.
 |------|-----|-----|
 | ST-Link (default) | `0483:3752`, ST-Link/V2-1 | STM32CubeIDE, STM32CubeProgrammer, OpenOCD, stlink |
 | CMSIS-DAP | `0D28:0204`, "hybridlink CMSIS-DAP" | OpenOCD, pyOCD, probe-rs, Pico SDK tools |
+| WCH-Link | `1A86:8010`, "WCH-Link" | MounRiver Studio, WCH OpenOCD, wlink, probe-rs (CH32V RISC-V targets) |
 
 ```bash
 hybridlink set-type dap --serial <serial>
+```
+
+```bash
+hybridlink set-type wch --serial <serial>
 ```
 
 ```bash
@@ -88,7 +99,7 @@ hybridlink set-type stlink --serial <serial>
 ```
 
 The mode is stored in the configuration page and the probe restarts in it.
-Both modes keep the virtual COM port, the serial number, the bootloader and
+All modes keep the virtual COM port, the serial number, the bootloader and
 `hybridlink update`.
 
 CMSIS-DAP mode implements CMSIS-DAP v2 (bulk endpoints, WinUSB through
@@ -104,6 +115,35 @@ the VCP. The command processor is written from the published protocol
 `0D28:0204` is the DAPLink identity, kept so existing udev rules and tool
 setups apply; tools find CMSIS-DAP probes by the product string, so any
 VID/PID works (`DAP_USB_VID` / `DAP_USB_PID` at build time).
+
+### WCH-Link mode
+
+WCH-Link mode makes the probe look like a WCH-Link (firmware 2.12, the
+CH549 based "WCH-Link-CH549") and debug WCH's CH32V RISC-V chips over
+RVSWD, WCH's two-wire debug interface, on the probe's SWCLK and SWDIO pins.
+Wiring to a CH32V board: SWCLK to the target's SWCLK/CLK (PA14 on a
+CH32V307), SWDIO to SWDIO/DIO (PA13), GND, and the VCP to a target UART.
+
+* Host tools: MounRiver Studio (download and debugging), WCH's OpenOCD
+  (`program`, GDB), wlink (flash, erase, reset, read protection, memory,
+  registers) and probe-rs (it finds the probe by the product string
+  "WCH-Link").
+* The probe answers the WCH-Link command set itself: version, attach,
+  speed, debug module (DMI) access, reset, chip information, read
+  protection, memory read, flash erase and programming. The flash routine
+  that host tools upload for the probe to run is not used: the probe
+  programs the flash itself through the debug module (fast 256-byte page
+  erase and program), so no WCH binary is ever run or stored. A failed or
+  mismatching page stops the acknowledgements, so the host reports an
+  error.
+* Tested on a CH32V307 (CH32V30x family). The CH32V20x and V10x use the
+  same RVSWD and flash controller but are not tested yet; the one-wire SDI
+  of the CH32V003 is not supported.
+* VCP: the command endpoints are 16 bytes instead of 64, so the serial port
+  keeps 64-byte endpoints; 2 Mbit/s full duplex runs at about 180 kB/s.
+
+The protocol notes, as observed on a genuine WCH-Link, are in
+[docs/wch.md](docs/wch.md).
 
 ## Downloads
 
@@ -363,6 +403,11 @@ app/               probe application
   stlink_usb.c     TinyUSB class driver for the ST-Link debug interface
   dap.c            CMSIS-DAP command processor (transport independent)
   dap_usb.c        TinyUSB class driver for the CMSIS-DAP v2 interface
+  wch.c            WCH-Link command set (transport independent)
+  wch_flash.c      CH32V flash programming through the debug module
+  wch_usb.c        TinyUSB class driver for the WCH-Link interface
+  rvswd.c          WCH RVSWD packet layer (bit-banged through swd_io.h)
+  rvdm.c           RISC-V debug module helpers (halt, reset, memory access)
   settings.c       mode / version settings, vendor control requests
   swd.c            SWD / ADIv5 / MEM-AP engine (bit-banged through swd_io.h)
   vcp.c            CDC <-> UART bridge
@@ -392,8 +437,8 @@ linker scripts; a new board needs a `boards/<board>/board.h`. Select them with
 
 | Pin | Function |
 |-----|----------|
-| PB13 (+PA5) | SWCLK |
-| PB14 | SWDIO driver (tri-stated while reading) |
+| PB13 (+PA5) | SWCLK (RVSWD CLK in WCH-Link mode) |
+| PB14 | SWDIO driver (tri-stated while reading; RVSWD DIO) |
 | PB12 | SWDIO sense |
 | PB0 | target NRST (open drain) |
 | PA2 / PA3 | VCP TX / RX (USART2) |
@@ -429,7 +474,8 @@ Tested on a Jolt Connect against an STM32F407:
 * OpenOCD 0.12: reset/halt, step, 8/16/32-bit memory access, registers,
   breakpoints, 128 KiB RAM download in 0.9 s at 4 MHz (byte exact from
   4 MHz down to 100 kHz); also with the `stlink-dap` (dap-direct) driver:
-  step, hardware breakpoint, 64 KiB RAM write, verify and read back
+  step, hardware breakpoint, 64 KiB RAM write, verify and read back;
+  on an STM32H723 (several access ports) as well since 0.6.0
 * stlink (st-info / st-flash): probe, read 512 KiB, write + verify
 * bootloader: app -> DFU switch, dfu-util download/upload, return to app
 * ST-LinkUpgrade 3.17.11: installs ST's V2J48M35 on a blank probe and from
@@ -460,12 +506,30 @@ CMSIS-DAP mode, against an RP2354 (RP2350, Raspberry Pi OpenOCD 0.12.0+dev):
 * 256 KiB flash read and RAM write at about 125 KB/s, byte exact
 * GDB: reset halt, hardware breakpoint, step, hardware watchpoint
 * pyOCD 0.45 (target rp2350): connect, memory access
-* VCP: target UART output at 115200
+* VCP: target UART output at 115200; full-duplex echo of random data at
+  921600 and 2 Mbit/s without errors
+* Pico SDK flashing from VS Code, also after a cold start of the RP2350
+  (dormant debug port woken by OpenOCD through `DAP_SWJ_Sequence`)
+
 CMSIS-DAP mode, against an STM32F407 (OpenOCD 0.12):
 
 * program + verify of 512 KiB flash in 16.5 s
 * GDB: reset halt, step, hardware breakpoint; pyOCD (generic cortex_m)
 * SWO: 2 Mbaud UART trace through `DAP_SWO_Data`, byte exact at full rate
+
+WCH-Link mode, against a CH32V307 (CH32V307V-R1 board, its own WCH-Link
+disconnected):
+
+* wlink 0.1.3: status, registers, flash of 20 KB in about 3 s, erase,
+  reset, read protection on and off
+* probe-rs 0.32: list, info, download, reset, memory read
+* WCH OpenOCD (from MounRiver Studio): `program ... verify reset`; GDB with
+  hardware breakpoints, stepping, memory read and write
+* MounRiver Studio 3.0.0: download and debugging; the USB traffic matches
+  the genuine WCH-Link's command for command
+* every flash test writes two different images in turn and reads each back
+* VCP: full-duplex echo of random data at 921600 (87.6 kB/s) and 2 Mbit/s
+  (180 kB/s) without errors
 
 Not tested yet: multidrop TARGETSEL (the RP2350 configuration does not use
 it; an RP2040 would), Windows.
