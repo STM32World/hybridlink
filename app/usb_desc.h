@@ -10,6 +10,11 @@ enum { ITF_STLINK = 0, ITF_DAP = 0, ITF_WCH = 0, ITF_CDC_CTRL = 1, ITF_CDC_DATA 
 #define EP_TRACE_IN     0x82
 #define EP_DAP_OUT      0x01
 #define EP_DAP_IN       0x81
+/* WCH-Link: the genuine link has 64-byte command endpoints. Requests are
+ * at most 11 bytes and replies 20, so 16 is enough (a 20-byte reply is
+ * one full and one short packet); the PMA space goes to the VCP instead,
+ * which needs 64-byte endpoints for 2 Mbit/s. */
+#define WCH_CMD_EP_SIZE 16
 #define EP_WCH_CMD_OUT  0x01   /* fixed by the WCH hosts */
 #define EP_WCH_CMD_IN   0x81
 #define EP_WCH_DATA_OUT 0x02

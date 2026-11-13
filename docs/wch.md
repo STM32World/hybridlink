@@ -294,7 +294,9 @@ hybridlink's WCH mode has no reason to implement this mode.
 To switch a probe to this mode, run `hybridlink set-type wch`. The probe then
 appears as `1a86:8010`, product string "WCH-Link" (probe-rs matches on that
 exact string), bcdDevice 2.12. Its descriptors: the vendor interface as in
-§3.1, plus a VCP whose data endpoints are 16 bytes, because of PMA space.
+§3.1, but with 16-byte command endpoints (requests are at most 11 bytes,
+replies at most 20), plus a VCP with 64-byte data endpoints. With 16-byte
+VCP endpoints instead, 2 Mbit/s reached only 130 kB/s.
 
 Source files:
 
@@ -313,7 +315,7 @@ Tested on the CH32V307 from a Jolt Connect:
 | wlink 0.1.3 | status, regs, flash (20 KB in about 3 s), erase, reset, protect / unprotect |
 | probe-rs 0.32 | list, info, download, reset, read |
 | WCH OpenOCD | `program … verify reset`; GDB debug session (hardware breakpoints, stepping, memory read/write) |
-| VCP | target USART1 (PA9/PA10) at 115200, both directions |
+| VCP | target USART1 (PA9/PA10): full-duplex echo of random data without errors at 921600 (87.6 kB/s, 95 % of the line) and 2 Mbit/s (180 kB/s, 90 %) |
 
 The test that matters for flash writes: alternate between two images and
 read each back.

@@ -6,8 +6,9 @@
  *   IF1/IF2 CDC ACM VCP (IAD): EP4 IN notify, EP5 OUT/IN data
  *
  * WCH-Link mode, laid out like WCH-Link firmware 2.12:
- *   IF0 vendor FF/80/55: EP1 OUT/IN commands, EP2 OUT/IN data (64)
- *   IF1/IF2 CDC ACM VCP with 16-byte data endpoints (PMA space)
+ *   IF0 vendor FF/80/55: EP1 OUT/IN commands (16, see usb_desc.h),
+ *   EP2 OUT/IN data (64)
+ *   IF1/IF2 CDC ACM VCP, as above
  *
  * CMSIS-DAP mode:
  *   IF0 vendor "CMSIS-DAP v2": EP1 OUT/IN bulk (64)
@@ -149,9 +150,9 @@ static const uint8_t wch_cfg[] = {
     9, TUSB_DESC_INTERFACE, ITF_WCH, 0, 4, 0xFF, 0x80, 0x55, 4,
     7, TUSB_DESC_ENDPOINT, EP_WCH_DATA_IN,  TUSB_XFER_BULK, U16_TO_U8S_LE(64), 0,
     7, TUSB_DESC_ENDPOINT, EP_WCH_DATA_OUT, TUSB_XFER_BULK, U16_TO_U8S_LE(64), 0,
-    7, TUSB_DESC_ENDPOINT, EP_WCH_CMD_IN,   TUSB_XFER_BULK, U16_TO_U8S_LE(64), 0,
-    7, TUSB_DESC_ENDPOINT, EP_WCH_CMD_OUT,  TUSB_XFER_BULK, U16_TO_U8S_LE(64), 0,
-    VCP_DESC(6, 7, 16),
+    7, TUSB_DESC_ENDPOINT, EP_WCH_CMD_IN,   TUSB_XFER_BULK, U16_TO_U8S_LE(WCH_CMD_EP_SIZE), 0,
+    7, TUSB_DESC_ENDPOINT, EP_WCH_CMD_OUT,  TUSB_XFER_BULK, U16_TO_U8S_LE(WCH_CMD_EP_SIZE), 0,
+    VCP_DESC(6, 7, 64),
 };
 TU_VERIFY_STATIC(sizeof(wch_cfg) == WCH_CONFIG_LEN, "config length");
 
