@@ -313,6 +313,7 @@ Tested on the CH32V307 from a Jolt Connect:
 | wlink 0.1.3 | status, regs, flash (20 KB in about 3 s), erase, reset, protect / unprotect |
 | probe-rs 0.32 | list, info, download, reset, read |
 | WCH OpenOCD | `program … verify reset`; GDB debug session (hardware breakpoints, stepping, memory read/write) |
+| VCP | target USART1 (PA9/PA10) at 115200, both directions |
 
 The test that matters for flash writes: alternate between two images and
 read each back.
@@ -353,8 +354,6 @@ Findings:
 
 Open:
 
-- The UART path to the target is not verified yet. The wiring is suspected
-  to be swapped: no data in either direction, in both ST-Link and WCH mode.
 - MounRiver (its native download and debug) is not tested.
 - Speed codes 2/3 have rough delays only.
 - Busy/fail RVSWD status codes are not seen yet.
