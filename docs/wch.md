@@ -289,31 +289,77 @@ hybridlink's WCH mode has no reason to implement this mode.
 - Target power control: wlink's power commands produced no traffic on this
   link.
 
-## 4. Plan
+## 4. Implementation status (hybridlink WCH-Link mode)
 
-1. `common/rvswd.c`: portable RVSWD bit-bang on the existing SWD pin macros;
-   DMI read/write with retries on busy. Bring-up test: read 0x7F on the CH32V307
-   from the Jolt Connect (on-board WCH-Link jumpers removed), compare with the
-   values in §2.
-2. New mode **WCH-Link** (`set-type wch`, `1a86:8010`, bcdDevice 2.12,
-   strings as in §3.1 except the serial, which is our own).
-   - Commands `0d`, `0c`, `08`, `0b` and `11` come first. That is enough for
-     probe-rs and for MounRiver/OpenOCD debugging.
-   - Endpoint memory on the F103 (512 B PMA, minus the BTABLE for EP0–4):
-     - EP0 64+64;
-     - vendor IF 4 × 64 (fixed by the hosts);
-     - CDC notification 8;
-     - CDC data 2 × 32;
-     - total 456 B, which fits.
-3. Programming: `01`, `03`, `02 xx`, `06` and the data endpoints.
-   - hybridlink programs the flash controller itself over DMI.
-   - It accepts the uploaded routine (`02 05`) and discards it, so no WCH
-     binary is ever run or stored.
-   - It acks every 4096 B with `41 01 01 04`.
-4. Validate each step with all four hosts against the traces of the genuine
-   link (tracer: ptrace-based, since wlink/probe-rs use raw syscalls).
-5. Later: hybridlink running on the CH32V307 itself (USB HS) as a step towards
-   the CH32V407 port.
+To switch a probe to this mode, run `hybridlink set-type wch`. The probe then
+appears as `1a86:8010`, product string "WCH-Link" (probe-rs matches on that
+exact string), bcdDevice 2.12. Its descriptors: the vendor interface as in
+§3.1, plus a VCP whose data endpoints are 16 bytes, because of PMA space.
+
+Source files:
+
+| file | contents |
+|------|----------|
+| `app/rvswd.c` | packet layer (§1) |
+| `app/rvdm.c` | debug module helpers: halt, resume, reset, memory access through the program buffer, streamed flash writes |
+| `app/wch.c` | the command set |
+| `app/wch_flash.c` | flash and option bytes |
+| `app/wch_usb.c` | USB class driver |
+
+Tested on the CH32V307 from a Jolt Connect:
+
+| host | what works |
+|------|------------|
+| wlink 0.1.3 | status, regs, flash (20 KB in about 3 s), erase, reset, protect / unprotect |
+| probe-rs 0.32 | list, info, download, reset, read |
+| WCH OpenOCD | `program … verify reset`; GDB debug session (hardware breakpoints, stepping, memory read/write) |
+
+The test that matters for flash writes: alternate between two images and
+read each back.
+
+Findings:
+
+- **Programming:**
+  - The probe programs the flash itself and discards the uploaded routine.
+  - Standard halfword programming takes about 2.6 ms per halfword.
+  - The fast mode works:
+    1. Erase each 256-byte page with FTER + STRT.
+    2. Set FTPG, then write 64 words, waiting for WRBSY (STATR bit 1) after
+       each. BSY stays set while the buffer fills.
+    3. Start programming with PGSTRT (CTLR bit 21), not STRT.
+  - The procedure was checked against the MIT-licensed ch32fun driver.
+  - The program buffer runs `sw; addi; poll WRBSY`. The probe checks the
+    abstract command status after each word, because a DMI write while the
+    command is busy is dropped and sets a sticky error.
+- **Clock:**
+  - The datasheet limits flash programming to HCLK ≤ 60 MHz.
+  - The debug interface also runs on HCLK. Dividing an 8 MHz HSI clock by 4
+    broke the link at full speed, so the AHB prescaler is only raised when
+    the target runs from the PLL.
+- **After a mass erase,** the core stays halted. Resuming into erased flash
+  left the debug module unreachable until a reset; the recovery is
+  dmcontrol 0 → 1, then ndmreset.
+- **Reset:**
+  - `0b 01` resets and runs. A reset is needed so that newly written code
+    runs, which the alternating-image test confirms.
+  - `0b 02` resets and halts, as the genuine link does: OpenOCD verifies
+    right after it.
+- **Option bytes** are 8 halfwords at 0x1FFFF800. On the CH32V307, USER
+  bits 7:6 select the flash/RAM split (256K/64K on this chip, USER 0xBF), so
+  protect/unprotect reads all of them and writes back everything except
+  RDPR. OBWRE must stay set in every CTLR write.
+- **abstractcs.cmderr** can be left set by a host; it is cleared before the
+  probe's own memory accesses.
+
+Open:
+
+- The UART path to the target is not verified yet. The wiring is suspected
+  to be swapped: no data in either direction, in both ST-Link and WCH mode.
+- MounRiver (its native download and debug) is not tested.
+- Speed codes 2/3 have rough delays only.
+- Busy/fail RVSWD status codes are not seen yet.
+- CH32V2xx/V1xx and CH32V003 (SDI) are untested.
+- The WCH-LinkE (`1a86:8010` with another probe type) is not emulated.
 
 ## Sources
 
