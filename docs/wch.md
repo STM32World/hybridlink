@@ -315,7 +315,7 @@ Tested on the CH32V307 from a Jolt Connect:
 | wlink 0.1.3 | status, regs, flash (20 KB in about 3 s), erase, reset, protect / unprotect |
 | probe-rs 0.32 | list, info, download, reset, read |
 | WCH OpenOCD | `program … verify reset`; GDB debug session (hardware breakpoints, stepping, memory read/write) |
-| MounRiver 3.0.0 | download (erase, program, "verify", reset; 7.4 KB in 2.8 s, flash checked against the hex afterwards); debug session starts |
+| MounRiver 3.0.0 | download and a debug session (breakpoint, step, variables): the traced command sequence matches the genuine link's command for command, same image and routine CRCs, no DMI or abstract command errors |
 | VCP | target USART1 (PA9/PA10): full-duplex echo of random data without errors at 921600 (87.6 kB/s, 95 % of the line) and 2 Mbit/s (180 kB/s, 90 %) |
 
 The test that matters for flash writes: alternate between two images and
@@ -357,10 +357,9 @@ Findings:
 
 Open:
 
-- MounRiver's download uses `02 04` (write with verify), but the probe does
-  not read back. A failed page write is only recorded internally; how the
-  genuine link reports a verify error is unknown, so MounRiver would still
-  report success.
+- A failed or mismatching page (`02 04` reads each page back) stops the
+  acknowledgements, so the host times out with an error. The genuine link's
+  own error report has never been seen.
 - Speed codes 2/3 have rough delays only.
 - Busy/fail RVSWD status codes are not seen yet.
 - CH32V2xx/V1xx and CH32V003 (SDI) are untested.
