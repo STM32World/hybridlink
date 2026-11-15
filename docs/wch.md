@@ -74,6 +74,10 @@ bit-level script engine behind HL vendor requests 07/08 (`app/rvswd_raw.c`).
     resumereq brings 0x00030c82 back.
 - **Speed:** works with no extra delay in the script engine, the fastest it
   can run. The real driver will be measured with the DWT later.
+  The driver gives every read bit a short settle time between the falling
+  edge and the sample: without it, at the highest speed (no delay), 197 of
+  200 dmstatus reads failed on the Jolt Connect bench (series resistor on
+  DIO, sense on a separate pin), while medium and low worked.
 - **Not seen yet:** the status nibble for a busy or failed access.
 
 Jolt Connect: SWCLK = PB13, SWDIO driver = PB14 (through series R), sense = PB12.
@@ -161,8 +165,8 @@ answers like 2.12.
 | cmd | request payload | reply payload | notes |
 |-----|-----------------|---------------|-------|
 | 0d 01 | – | `02 0c 01 00` | version 2.12, probe type 1 = WCH-Link-CH549; fw 2.3 sent `02 03` |
-| 0d 02 | – | `06 id[4]` | attach: target family + chip ID read live from the target (`30 70 05 18`; after a full erase `e3 39 e3 39`); ≈ 40 ms |
-| 0d ff | – | `ff` | detach; DMI keeps working afterwards, the target is not released |
+| 0d 02 | – | `06 id[4]` | attach: target family + chip ID read live from the target (`30 70 05 18`; after a full erase `e3 39 e3 39`); ≈ 40 ms; leaves the hart halted (every trace reads dmstatus 0x382 next) |
+| 0d ff | – | `ff` | detach; DMI keeps working afterwards. A halted hart runs again: WCH's OpenOCD ends `reset` (a reset-halt) and wlink ends `dump` / `status` with only this command. hybridlink resumes a halted hart here unless the reset vector reads erased flash (0xE339E339) |
 | 0d 04 | – | `02` or `00` | sent by wlink after the protection check; meaning unknown, varies with state |
 | 0d 17 | – | `05`, `01`, `00` | sent by OpenOCD before erase/program; meaning unknown, varies with state |
 | 0d 03/05/07/10/18 | – | echo of the subcommand | not used by any host |

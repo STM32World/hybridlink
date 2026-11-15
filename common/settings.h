@@ -22,6 +22,10 @@
  *   IN  SWO_STATUS   32-bit little endian words (from 0.5.3 on): receiving,
  *                    bytes received, delivered, dropped, then port specific
  *                    registers (hal_swo_status)
+ *   IN  VCP_STATUS   32-bit little endian words (from 0.6.1 on): bytes
+ *                    received from the target UART, delivered to the host,
+ *                    dropped (host did not read in time), then port
+ *                    specific registers (hal_vcp_status)
  *
  * SPDX-License-Identifier: MIT
  */
@@ -41,6 +45,7 @@
 #define HL_REQ_SWO_STATUS  0x06
 #define HL_REQ_RVSWD_RUN   0x07          /* RVSWD_RAW builds only */
 #define HL_REQ_RVSWD_RES   0x08
+#define HL_REQ_VCP_STATUS  0x09
 #define HL_REQ_MAGIC       0x484C          /* "HL" */
 
 bool rvswd_raw_request(uint8_t rhport, uint8_t stage, const void *request);

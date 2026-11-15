@@ -276,6 +276,11 @@ void stlink_mem_in(const uint8_t *c, uint32_t off, uint8_t *buf, uint32_t n)
     last_status = mem_read(get32(c + 2) + (inc ? off : 0), buf, n, size, inc);
 }
 
+bool stlink_mem_splittable(const uint8_t *c)
+{
+    return !is_misc(c, DBG_APIV2_RW_MISC_OUT);
+}
+
 void stlink_mem_out(const uint8_t *c, uint32_t off, const uint8_t *buf, uint32_t n)
 {
     bool wr, inc;

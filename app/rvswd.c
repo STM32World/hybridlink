@@ -52,12 +52,18 @@ static void out_bits(uint32_t v, unsigned n)
     }
 }
 
+/* The target drives DIO after the falling edge; through the series
+ * resistor and the cable it needs a moment to reach the sense pin, so a
+ * read bit gets a minimum settle time even at the highest speed. */
+#define READ_SETTLE 2
+
 static uint32_t in_bits(unsigned n)
 {
     uint32_t v = 0;
     while (n--) {
         swd_io_clk_lo();
         half();
+        swd_io_delay(READ_SETTLE);
         swd_io_clk_hi();
         half();
         v = (v << 1) | swd_io_dio_get();

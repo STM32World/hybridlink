@@ -52,6 +52,7 @@ size_t   hal_vcp_rx(uint8_t *buf, size_t max);      /* drain received bytes */
 size_t   hal_vcp_tx_space(void);
 size_t   hal_vcp_tx(const uint8_t *buf, size_t len);
 void     hal_vcp_set_break(bool on);
+unsigned hal_vcp_status(uint32_t *w, unsigned max);
 
 /* ---- SWO (UART/NRZ trace) ------------------------------------------- */
 bool     hal_swo_start(uint32_t baud);

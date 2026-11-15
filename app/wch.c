@@ -133,6 +133,24 @@ static uint16_t chip_info(uint8_t *r)
     return 20;                                  /* this reply has no header */
 }
 
+/* 0d ff, detach: the genuine link lets the hart run (hosts such as WCH's
+ * OpenOCD after "reset" and wlink after a dump send no resume of their
+ * own). A halted hart is resumed unless the flash is erased: running
+ * erased flash can leave the debug module unreachable. */
+#define FLASH_ERASED 0xE339E339u
+
+static void detach(void)
+{
+    bool run;
+    uint32_t v = FLASH_ERASED;
+    if (!rvdm_is_halted() || !rvdm_begin(&run))
+        return;
+    rvdm_mem_read32(0x00000000u, &v);
+    rvdm_end(false);
+    if (v != FLASH_ERASED)
+        rvdm_resume();
+}
+
 static uint16_t control(uint8_t sub, uint8_t *r)
 {
     uint8_t p[5];
@@ -150,7 +168,10 @@ static uint16_t control(uint8_t sub, uint8_t *r)
     case 0x04: return reply1(r, CMD_CONTROL, 0x02);
     case 0x17: return reply1(r, CMD_CONTROL, 0x05);
     case 0x06: return reply1(r, CMD_CONTROL, 0x00);
-    case 0x03: case 0x05: case 0x07: case 0x10: case 0x18: case 0xFF:
+    case 0xFF:
+        detach();
+        return reply1(r, CMD_CONTROL, sub);
+    case 0x03: case 0x05: case 0x07: case 0x10: case 0x18:
         return reply1(r, CMD_CONTROL, sub);
     default:
         return reply1(r, CMD_CONTROL, 0xFF);

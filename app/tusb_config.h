@@ -14,7 +14,10 @@
 /* interface 0 (ST-Link debug) is a custom class driver, see stlink_usb.c */
 #define CFG_TUD_CDC             1
 #define CFG_TUD_CDC_RX_BUFSIZE  256
-#define CFG_TUD_CDC_TX_BUFSIZE  256
-#define CFG_TUD_CDC_EP_BUFSIZE  64
+#define CFG_TUD_CDC_RX_EPSIZE   64
+/* target -> host: transfers of up to 8 packets, sent by the USB interrupt,
+ * so 2 Mbit/s keeps flowing while a debug command holds up the main loop */
+#define CFG_TUD_CDC_TX_BUFSIZE  1024
+#define CFG_TUD_CDC_TX_EPSIZE   512
 
 #endif

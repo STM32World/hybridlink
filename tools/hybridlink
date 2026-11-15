@@ -13,7 +13,7 @@
                                       over USB and install the application;
                                       a protected ST bootloader stays and the
                                       application runs under it
-  hybridlink set-type stlink | dap | wch [--serial SN]
+  hybridlink set-type st[link] | dap[link] | wch[link] [--serial SN]
                                       switch between ST-Link and CMSIS-DAP
                                       (DAPLink compatible) mode
   hybridlink set-version V2J49M36 | default | auto [--serial SN]
@@ -26,6 +26,11 @@
                                       received / delivered / dropped and the
                                       UART and DMA state (run it while a
                                       trace session is open)
+  hybridlink vcp-status [--serial SN]
+                                      show the VCP receive counters: bytes
+                                      from the target UART, delivered to the
+                                      host, dropped because the host did not
+                                      read in time
 
 Images are looked up in ../build next to this script (a source tree) and
 then in ../share/hybridlink (after make install).
@@ -39,13 +44,14 @@ DAP_IDS = ((0x0D28, 0x0204),)            # hybridlink in CMSIS-DAP mode
 WCH_IDS = ((0x1A86, 0x8010),)            # hybridlink in WCH-Link mode
 HL_IDS = DAP_IDS + WCH_IDS               # non-ST identities
 DFU_ID = "0483:3748"
-MODES = {"stlink": 0, "dap": 1, "daplink": 1, "cmsis-dap": 1, "wch": 2, "wchlink": 2}
+MODES = {"stlink": 0, "st": 0, "st-link": 0, "dap": 1, "daplink": 1, "cmsis-dap": 1, "wch": 2, "wchlink": 2}
 MODE_NAMES = {0: "ST-Link", 1: "CMSIS-DAP", 2: "WCH-Link"}
 
 # vendor control requests of the hybridlink application (common/settings.h)
 HL_REQ_GET_VERSION = 0x01
 HL_REQ_SET_VERSION = 0x02
 HL_REQ_SWO_STATUS = 0x06
+HL_REQ_VCP_STATUS = 0x09
 HL_REQ_GET_MODE = 0x03
 HL_REQ_SET_MODE = 0x04
 HL_REQ_ENTER_DFU = 0x05
@@ -681,10 +687,32 @@ def swo_status(d):
         print(f"pins     GPIOA_CRH {crh:08x}, AFIO_MAPR {mapr:08x}")
 
 
+def vcp_status(d):
+    """the probe's VCP receive counters (firmware 0.6.1 and later)"""
+    try:
+        r = bytes(d.ctrl_transfer(0xC0, HL_REQ_VCP_STATUS, 0, HL_REQ_MAGIC, 64, 1000))
+    except usb.core.USBError:
+        sys.exit("the probe's firmware does not report the VCP state (0.6.1 or later)")
+    w = [int.from_bytes(r[i:i + 4], "little") for i in range(0, len(r) - 3, 4)]
+    if len(w) < 3:
+        sys.exit("unexpected VCP status reply")
+    head, tail, dropped = w[:3]
+    print(f"received {head} bytes from the target, delivered {tail - dropped}, "
+          f"dropped {dropped}, waiting {head - tail}")
+    if len(w) >= 7:                         # STM32F1 port: register snapshot
+        sr, brr, cr1, cr3 = w[3:7]
+        errs = [n for b, n in ((3, "overrun"), (2, "noise"), (1, "framing"))
+                if sr & (1 << b)]
+        print(f"uart     SR {sr:04x} ({', '.join(errs) or 'no errors'}), BRR {brr:x}, "
+              f"CR1 {cr1:04x}, CR3 {cr3:04x}")
+    if len(w) >= 8:
+        print(f"service  longest gap between receive polls {w[7]} us (since the last read)")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("action", choices=("info", "dfu", "update", "install", "set-type",
-                                       "set-version", "swo-status"))
+                                       "set-version", "swo-status", "vcp-status"))
     ap.add_argument("arg", nargs="?",
                     help="image for update, stlink|dap|wch for set-type, version for set-version")
     ap.add_argument("--serial")
@@ -704,6 +732,9 @@ def main():
         return
     if a.action == "swo-status":
         swo_status(d)
+        return
+    if a.action == "vcp-status":
+        vcp_status(d)
         return
     if a.action == "install":
         usb.util.dispose_resources(d)

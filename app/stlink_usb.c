@@ -25,6 +25,7 @@ static volatile enum state state;
 static volatile bool opened;
 static volatile bool cmd_ready;     /* command (ST_EXEC) or chunk (ST_DATA_OUT) */
 static uint32_t xfer_total, xfer_done, chunk_len;
+static uint32_t piece;              /* bytes of the current chunk done over SWD */
 
 static void arm_cmd(void)
 {
@@ -103,6 +104,7 @@ static bool drv_xfer(uint8_t rhport, uint8_t ep, xfer_result_t result, uint32_t 
         xfer_done = 0;
         if (xfer_total) {
             state = ST_DATA_OUT;
+            piece = 0;
             arm_out_chunk();
         } else {
             state = ST_EXEC;
@@ -126,16 +128,45 @@ const usbd_class_driver_t stlink_driver = {
     .sof = NULL,
 };
 
-static void send_in_chunk(void)
+/* Memory data is moved over SWD in pieces, one per main loop pass: a whole
+ * 6 KB chunk at once keeps the loop away from the VCP for tens of ms, and
+ * at 2 Mbit/s its receive buffer overflows. */
+#define PIECE 256u
+
+static uint32_t chunk_size(void)
 {
     uint32_t n = xfer_total - xfer_done;
-    if (n > STLINK_DATA_MAX)
-        n = STLINK_DATA_MAX;
-    stlink_mem_in(cmd, xfer_done, data, n);
+    return n > STLINK_DATA_MAX ? STLINK_DATA_MAX : n;
+}
+
+/* one piece of the current IN chunk; the chunk goes out when complete */
+static void in_step(void)
+{
+    uint32_t n = chunk_size(), k = n - piece;
+    if (k > PIECE)
+        k = PIECE;
+    stlink_mem_in(cmd, xfer_done + piece, data + piece, k);
+    piece += k;
+    if (piece < n)
+        return;
     usbd_edpt_xfer(rhport_used, EP_STLINK_IN, data, (uint16_t)n, false);
     xfer_done += n;
+    piece = 0;
     if (xfer_done >= xfer_total)
         arm_cmd();
+}
+
+/* one piece of the received OUT chunk; true when the chunk is done */
+static bool out_step(void)
+{
+    uint32_t k = chunk_len - piece;
+    if (!stlink_mem_splittable(cmd))
+        k = chunk_len;
+    else if (k > PIECE)
+        k = PIECE;
+    stlink_mem_out(cmd, xfer_done + piece, data + piece, k);
+    piece += k;
+    return piece >= chunk_len;
 }
 
 /* ---- trace endpoint ---------------------------------------------------
@@ -259,16 +290,19 @@ void stlink_usb_task(void)
     trace_task();
 
     if (state == ST_DATA_IN) {
-        if (!usbd_edpt_busy(rhport_used, EP_STLINK_IN))
-            send_in_chunk();
+        /* the buffer is refilled only once the previous chunk has gone */
+        if (piece || !usbd_edpt_busy(rhport_used, EP_STLINK_IN))
+            in_step();
         return;
     }
     if (!cmd_ready)
         return;
 
     if (state == ST_DATA_OUT) {
+        if (!out_step())
+            return;
         cmd_ready = false;
-        stlink_mem_out(cmd, xfer_done, data, chunk_len);
+        piece = 0;
         xfer_done += chunk_len;
         if (xfer_done >= xfer_total || chunk_len == 0 || (chunk_len % 64u))
             arm_cmd();
@@ -285,8 +319,9 @@ void stlink_usb_task(void)
     xfer_total = stlink_in_len(cmd);
     if (xfer_total) {
         xfer_done = 0;
+        piece = 0;
         state = ST_DATA_IN;
-        send_in_chunk();
+        in_step();
         return;
     }
 

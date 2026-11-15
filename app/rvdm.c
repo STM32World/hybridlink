@@ -60,6 +60,9 @@ bool rvdm_attach(uint32_t *chip_id)
     if (rvdm_read(DM_WCH_CHIPID, &id) != DMI_OK)
         return false;
     *chip_id = id;
+    /* the genuine link leaves the hart halted after attach (every trace
+     * reads dmstatus 0x382 next); hosts read registers right away */
+    rvdm_halt();
     return true;
 }
 

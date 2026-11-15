@@ -90,6 +90,11 @@ bool settings_vendor_request(uint8_t rhport, uint8_t stage, const void *request)
                 return false;
             n = 4u * hal_swo_status((uint32_t *)buf, sizeof buf / 4u);
             break;
+        case HL_REQ_VCP_STATUS:
+            if (!in)
+                return false;
+            n = 4u * hal_vcp_status((uint32_t *)buf, sizeof buf / 4u);
+            break;
         case HL_REQ_SET_VERSION:
             if (in || !version_valid(req->wValue))
                 return false;

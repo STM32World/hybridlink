@@ -19,6 +19,12 @@ at run time:
   their two-wire RVSWD interface; works with MounRiver Studio, WCH's
   OpenOCD, wlink and probe-rs
 
+In every mode:
+
+* **USB to UART (virtual COM port) at up to 2 Mbit/s**: the full 200 kB/s
+  from the target, byte exact, also while a debugger is busy reading or
+  writing memory over SWD or RVSWD (see [VCP notes](#vcp-notes))
+
 See [Probe modes](#probe-modes). hybridlink is to become the default
 firmware of the [Jolt Connect](https://stm32world.com/wiki/Jolt_Connect) and
 the Streamline Connect, whose hardware matches the ST-Link found on early Nucleo boards
@@ -95,8 +101,10 @@ hybridlink set-type wch --serial <serial>
 ```
 
 ```bash
-hybridlink set-type stlink --serial <serial>
+hybridlink set-type st --serial <serial>
 ```
+
+(`stlink`, `daplink` and `wchlink` work as well.)
 
 The mode is stored in the configuration page and the probe restarts in it.
 All modes keep the virtual COM port, the serial number, the bootloader and
@@ -493,7 +501,10 @@ Tested on a Jolt Connect against an STM32F407:
   firmware (USB 0483:374a): full conversion, old version reset; CubeIDE's
   ST-Link update installs ST's firmware on the hybridlink bootloader
 * VCP: line coding, host -> target transmit, target -> host receive
-  (16 KiB burst at 921600 baud, byte exact, while SWD is busy)
+  (16 KiB burst at 921600 baud, byte exact, while SWD is busy);
+  STM32F407 at 2 Mbit/s with OpenOCD reading memory back to back over
+  SWD: 5 minutes of target -> host at the full 200 kB/s (60 MB) and
+  5 minutes of full-duplex echo of random data, both byte exact
 * SWO: 2 Mbaud UART/NRZ trace, sustained full rate (100 KB, ~200 KB/s)
   and paced streams byte exact with a polling host, also with 256-byte
   host reads as OpenOCD does; OpenOCD capture of 8 x 100000 ITM characters
@@ -506,8 +517,10 @@ CMSIS-DAP mode, against an RP2354 (RP2350, Raspberry Pi OpenOCD 0.12.0+dev):
 * 256 KiB flash read and RAM write at about 125 KB/s, byte exact
 * GDB: reset halt, hardware breakpoint, step, hardware watchpoint
 * pyOCD 0.45 (target rp2350): connect, memory access
-* VCP: target UART output at 115200; full-duplex echo of random data at
-  921600 and 2 Mbit/s without errors
+* VCP: target UART output at 115200; at 2 Mbit/s with OpenOCD reading
+  memory back to back over SWD: 5 minutes of target -> host at the full
+  200 kB/s (60 MB) and 5 minutes of full-duplex echo of random data,
+  both byte exact (the same with an STM32F407)
 * Pico SDK flashing from VS Code, also after a cold start of the RP2350
   (dormant debug port woken by OpenOCD through `DAP_SWJ_Sequence`)
 
@@ -528,8 +541,27 @@ disconnected):
 * MounRiver Studio 3.0.0: download and debugging; the USB traffic matches
   the genuine WCH-Link's command for command
 * every flash test writes two different images in turn and reads each back
-* VCP: full-duplex echo of random data at 921600 (87.6 kB/s) and 2 Mbit/s
-  (180 kB/s) without errors
+* VCP at 2 Mbit/s: target -> host at the full 200 kB/s; 5 minutes of it
+  while a debugger halts the core, reads memory over RVSWD and resumes it
+  about 10 times a second, byte exact; 8 minutes of full-duplex echo of
+  random data (74.5 MB), byte exact
+
+### VCP notes
+
+Target data is received by USART2 with circular DMA into a 2 KiB buffer
+and goes to the host in transfers of up to 512 bytes. Debug commands are
+executed in pieces (ST-Link memory transfers 256 bytes at a time), so the
+serial port keeps flowing at 2 Mbit/s while a debugger is busy. If the
+host stops reading (the port open but nobody reading it), the oldest data
+is dropped. To see the counters:
+
+```bash
+hybridlink vcp-status
+```
+
+It shows the bytes received from the target, delivered and dropped, the
+UART error flags and the longest time the probe left the receiver
+unserviced since the last call.
 
 Not tested yet: multidrop TARGETSEL (the RP2350 configuration does not use
 it; an RP2040 would), Windows.

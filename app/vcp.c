@@ -43,11 +43,18 @@ void vcp_task(void)
         hal_vcp_rx(buf, sizeof(buf));
         return;
     }
-    uint32_t space = tud_cdc_write_available();
-    if (space > sizeof(buf))
-        space = sizeof(buf);
-    size_t n = space ? hal_vcp_rx(buf, space) : 0;
-    if (n)
-        tud_cdc_write(buf, n);
+    /* empty what has arrived, but stop at the first short block: at
+     * 2 Mbit/s a byte arrives every 5 us, and chasing single bytes would
+     * keep the main loop (and the debug commands) waiting */
+    for (;;) {
+        uint32_t space = tud_cdc_write_available();
+        if (space > sizeof(buf))
+            space = sizeof(buf);
+        size_t n = space ? hal_vcp_rx(buf, space) : 0;
+        if (n)
+            tud_cdc_write(buf, n);
+        if (n < sizeof(buf))
+            break;
+    }
     tud_cdc_write_flush();
 }

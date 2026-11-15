@@ -337,14 +337,39 @@ void hal_target_init(void)
 /* VCP: USART2, RX by circular DMA (ch6), TX by interrupt ring         */
 /* ------------------------------------------------------------------ */
 
-#define VCP_RX_SIZE 512u
+/* 2 KiB: 10 ms at 2 Mbit/s before an unserviced ring laps */
+#define VCP_RX_SIZE 2048u
 #define VCP_TX_SIZE 512u
 
 static uint8_t vcp_rx_buf[VCP_RX_SIZE];
-static uint32_t vcp_rx_tail;
+static volatile uint32_t vcp_rx_wraps;  /* completed DMA laps            */
+static uint32_t vcp_rx_tail;            /* bytes consumed, running count */
+static uint32_t vcp_rx_dropped;
 static uint8_t vcp_tx_buf[VCP_TX_SIZE];
 static volatile uint32_t vcp_tx_head, vcp_tx_tail;
 static bool vcp_on;
+
+void DMA1_Channel6_IRQHandler(void)
+{
+    uint32_t isr = DMA1_ISR;
+    DMA1_IFCR = 0xFu << 20;             /* channel 6 flags */
+    if (isr & (1u << 21))               /* TCIF6 */
+        vcp_rx_wraps++;
+}
+
+/* bytes written by the DMA so far (see swo_head) */
+static uint32_t vcp_rx_head(void)
+{
+    __disable_irq();
+    uint32_t cnt = DMA1_CNDTR(6);
+    uint32_t wraps = vcp_rx_wraps;
+    if (DMA1_ISR & (1u << 21)) {        /* TCIF6 not yet handled */
+        wraps++;
+        cnt = DMA1_CNDTR(6);
+    }
+    __enable_irq();
+    return wraps * VCP_RX_SIZE + (VCP_RX_SIZE - cnt);
+}
 
 void USART2_IRQHandler(void)
 {
@@ -388,23 +413,59 @@ void hal_vcp_config(uint32_t baud, uint8_t bits, uint8_t parity, uint8_t stop)
     DMA1_CPAR(6) = USART2_BASE + 0x04;
     DMA1_CMAR(6) = (uint32_t)vcp_rx_buf;
     DMA1_CNDTR(6) = VCP_RX_SIZE;
+    DMA1_IFCR = 0xFu << 20;
+    vcp_rx_wraps = 0;
     vcp_rx_tail = 0;
-    DMA1_CCR(6) = DMA_CCR_MINC | DMA_CCR_CIRC | DMA_CCR_EN;
+    DMA1_CCR(6) = DMA_CCR_MINC | DMA_CCR_CIRC | (1u << 1) /* TCIE */ | DMA_CCR_EN;
+    NVIC_IPR(IRQ_DMA1_CH6) = 0x80;
+    nvic_enable(IRQ_DMA1_CH6);
     USART_CR1(USART2_BASE) = cr1;
     NVIC_IPR(IRQ_USART2) = 0x80;
     nvic_enable(IRQ_USART2);
 }
 
+static uint32_t vcp_rx_last, vcp_rx_gap;  /* longest time between calls */
+
 size_t hal_vcp_rx(uint8_t *buf, size_t max)
 {
     if (!vcp_on)
         return 0;
-    uint32_t head = VCP_RX_SIZE - DMA1_CNDTR(6);
-    size_t n = 0;
-    while (vcp_rx_tail != head && n < max) {
-        buf[n++] = vcp_rx_buf[vcp_rx_tail];
-        vcp_rx_tail = (vcp_rx_tail + 1u) % VCP_RX_SIZE;
+    uint32_t now = DWT_CYCCNT;
+    if (now - vcp_rx_last > vcp_rx_gap && vcp_rx_last)
+        vcp_rx_gap = now - vcp_rx_last;
+    vcp_rx_last = now;
+    uint32_t avail = vcp_rx_head() - vcp_rx_tail;
+    if ((int32_t)avail < 0)
+        return 0;
+    if (avail > VCP_RX_SIZE - 64u) {
+        /* overrun (the host did not read): keep the newest half */
+        uint32_t drop = avail - VCP_RX_SIZE / 2u;
+        vcp_rx_tail += drop;
+        vcp_rx_dropped += drop;
+        avail -= drop;
     }
+    size_t n = 0;
+    while (n < avail && n < max) {
+        buf[n++] = vcp_rx_buf[vcp_rx_tail % VCP_RX_SIZE];
+        vcp_rx_tail++;
+    }
+    return n;
+}
+
+/* received, delivered, dropped, USART SR, BRR, CR1, CR3, longest time
+ * in us between two receive polls since the last status read */
+unsigned hal_vcp_status(uint32_t *w, unsigned max)
+{
+    uint32_t v[] = { vcp_on ? vcp_rx_head() : 0, vcp_rx_tail, vcp_rx_dropped,
+                     USART_SR(USART2_BASE), USART_BRR(USART2_BASE),
+                     USART_CR1(USART2_BASE), USART_CR3(USART2_BASE),
+                     vcp_rx_gap / (SYSCLK_HZ / 1000000u) };
+    vcp_rx_gap = 0;
+    unsigned n = sizeof v / sizeof v[0];
+    if (n > max)
+        n = max;
+    for (unsigned i = 0; i < n; i++)
+        w[i] = v[i];
     return n;
 }
 

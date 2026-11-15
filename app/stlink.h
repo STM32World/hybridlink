@@ -23,6 +23,8 @@ uint32_t stlink_out_len(const uint8_t *cmd);
 uint32_t stlink_in_len(const uint8_t *cmd);
 void     stlink_mem_out(const uint8_t *cmd, uint32_t off, const uint8_t *buf, uint32_t n);
 void     stlink_mem_in(const uint8_t *cmd, uint32_t off, uint8_t *buf, uint32_t n);
+/* false: the OUT chunk must go to stlink_mem_out in one call */
+bool     stlink_mem_splittable(const uint8_t *cmd);
 /* any other command: reply (up to STLINK_DATA_MAX bytes) goes to reply,
  * *rlen = 0 means no reply */
 void     stlink_execute(const uint8_t *cmd, uint8_t *reply, uint32_t *rlen);
