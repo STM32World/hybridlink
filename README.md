@@ -592,7 +592,7 @@ it; an RP2040 would), Windows.
 
 ### SWO notes
 
-SWO is received as UART/NRZ by USART1 with circular DMA into a 4 KiB
+SWO is received as UART/NRZ by USART1 with circular DMA into a 5 KiB
 buffer, up to 4.5 Mbaud (2 Mbaud is what STM32CubeIDE uses by default).
 Hosts read it in two ways, and both are handled:
 
@@ -608,10 +608,12 @@ Hosts read it in two ways, and both are handled:
 Trace goes to the host in transfers of up to 512 bytes, whose 32-byte
 packets the USB interrupt sends back to back (since 0.7.3; before, one
 packet per main-loop pass lost trace under SWD load and slowed OpenOCD's
-memory reads). The 4 KiB buffer covers about 20 ms at 2 Mbaud: a host that
-goes longer without asking for trace loses some. OpenOCD does not poll
-while it runs a command, so back-to-back 1 KiB `read_memory` calls over its
-TCL port at 1.8 MHz SWD (about 19 ms each) are right at that limit.
+memory reads). The 5 KiB buffer (4 KiB before 0.7.4) covers about 25 ms at
+2 Mbaud: a host that goes longer without asking for trace loses some.
+OpenOCD does not poll while it runs a command; back-to-back 1 KiB
+`read_memory` calls over its TCL port at 1.8 MHz SWD take about 19 ms each.
+`hybridlink swo-status` also shows how much of the stack has never been
+used since reset, the margin left for larger buffers.
 
 If the host falls more than the buffer behind, the oldest data is dropped.
 OpenOCD 0.12 does not poll trace while it is blocked (`wait_halt`,

@@ -75,6 +75,7 @@
 /* ---- System memory info ---- */
 #define FLASH_SIZE_KB   REG16(0x1FFFF7E0u)
 #define UID_BASE        0x1FFFF7E8u
+#define STACK_PAINT     0xC5C5C5C5u     /* free stack, see hal_stack_unused */
 
 /* ---- GPIO ---- */
 #define GPIOA_BASE      0x40010800u

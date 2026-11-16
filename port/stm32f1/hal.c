@@ -496,10 +496,13 @@ void hal_vcp_set_break(bool on)
 /* SWO: USART1 RX (PA10) by circular DMA (ch5)                         */
 /* ------------------------------------------------------------------ */
 
-#define SWO_SIZE 4096u
+/* 5 KiB: 25 ms at 2 Mbaud for a host that pauses its trace reads, while
+ * leaving the stack its measured need (swo-status) plus 1 KiB. Not a power
+ * of two, so the running counts are 64-bit. */
+#define SWO_SIZE 5120u
 static uint8_t swo_buf[SWO_SIZE];
 static volatile uint32_t swo_wraps;     /* completed DMA laps            */
-static uint32_t swo_tail;               /* bytes consumed, running count */
+static uint64_t swo_tail;               /* bytes consumed, running count */
 static uint32_t swo_dropped;
 static bool swo_on;
 
@@ -514,7 +517,7 @@ void DMA1_Channel5_IRQHandler(void)
 /* bytes written by the DMA so far. A wrap whose interrupt is still pending
  * (the counter has already reloaded) is counted here, otherwise the head
  * would appear a whole buffer behind. */
-static uint32_t swo_head(void)
+static uint64_t swo_head(void)
 {
     __disable_irq();
     uint32_t cnt = DMA1_CNDTR(5);
@@ -524,7 +527,7 @@ static uint32_t swo_head(void)
         cnt = DMA1_CNDTR(5);            /* certainly after the wrap now */
     }
     __enable_irq();
-    return wraps * SWO_SIZE + (SWO_SIZE - cnt);
+    return (uint64_t)wraps * SWO_SIZE + (SWO_SIZE - cnt);
 }
 
 bool hal_swo_start(uint32_t baud)
@@ -565,31 +568,47 @@ void hal_swo_stop(void)
     swo_on = false;
 }
 
+size_t hal_swo_size(void)
+{
+    return SWO_SIZE;
+}
+
 size_t hal_swo_available(void)
 {
     if (!swo_on)
         return 0;
-    uint32_t n = swo_head() - swo_tail;
-    if ((int32_t)n < 0)
+    int64_t n = (int64_t)(swo_head() - swo_tail);
+    if (n < 0)
         return 0;                       /* never step the tail backwards */
-    if (n > SWO_SIZE - 256u) {
+    if (n > SWO_SIZE - 64u) {
         /* overrun: keep the newest half of the buffer */
-        uint32_t drop = n - SWO_SIZE / 2u;
+        uint32_t drop = (uint32_t)(n - SWO_SIZE / 2u);
         swo_tail += drop;
         swo_dropped += drop;
         n -= drop;
     }
-    return n;
+    return (size_t)n;
+}
+
+/* bytes of stack never used since reset (painted by Reset_Handler) */
+static uint32_t hal_stack_unused(void)
+{
+    extern uint32_t _ebss;
+    const uint32_t *p = &_ebss;
+    while (*p == STACK_PAINT)
+        p++;
+    return (uint32_t)p - (uint32_t)&_ebss;
 }
 
 /* on, received, consumed, dropped, USART SR, BRR, CR1, CR3, DMA CCR,
- * CNDTR, GPIOA CRH, AFIO MAPR */
+ * CNDTR, GPIOA CRH, AFIO MAPR, unused stack */
 unsigned hal_swo_status(uint32_t *w, unsigned max)
 {
-    uint32_t v[] = { swo_on, swo_on ? swo_head() : 0, swo_tail, swo_dropped,
+    uint32_t v[] = { swo_on, swo_on ? (uint32_t)swo_head() : 0, (uint32_t)swo_tail, swo_dropped,
                      USART_SR(USART1_BASE), USART_BRR(USART1_BASE),
                      USART_CR1(USART1_BASE), USART_CR3(USART1_BASE),
-                     DMA1_CCR(5), DMA1_CNDTR(5), GPIO_CRH(GPIOA_BASE), AFIO_MAPR };
+                     DMA1_CCR(5), DMA1_CNDTR(5), GPIO_CRH(GPIOA_BASE), AFIO_MAPR,
+                     hal_stack_unused() };
     unsigned n = sizeof v / sizeof v[0];
     if (n > max)
         n = max;
@@ -601,7 +620,7 @@ unsigned hal_swo_status(uint32_t *w, unsigned max)
 size_t hal_swo_peek(const uint8_t **p)
 {
     size_t n = hal_swo_available();
-    uint32_t pos = swo_tail % SWO_SIZE;
+    uint32_t pos = (uint32_t)(swo_tail % SWO_SIZE);
     if (n > SWO_SIZE - pos)
         n = SWO_SIZE - pos;             /* contiguous part only */
     *p = swo_buf + pos;

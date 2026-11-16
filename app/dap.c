@@ -63,7 +63,6 @@
 #define DP_RDBUFF_REQ       (XFER_RnW | 0x0C)
 #define DP_TARGETSEL_REQ    0x0C            /* DP write, A = 0xC */
 
-#define SWO_BUFFER_SIZE     4096u
 
 static struct {
     uint8_t  idle;
@@ -324,7 +323,7 @@ static uint32_t cmd_info(uint8_t id, uint8_t *r)
         return 3;
     case 0xFD:                              /* SWO trace buffer size */
         r[1] = 4;
-        put32(r + 2, SWO_BUFFER_SIZE);
+        put32(r + 2, (uint32_t)hal_swo_size());
         return 6;
     case 0xFE:
         r[1] = 1;

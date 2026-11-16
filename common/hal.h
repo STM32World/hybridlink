@@ -63,6 +63,7 @@ unsigned hal_vcp_status(uint32_t *w, unsigned max);
 bool     hal_swo_start(uint32_t baud);
 void     hal_swo_stop(void);
 size_t   hal_swo_available(void);
+size_t   hal_swo_size(void);            /* receive buffer, bytes */
 /* diagnostic words for the host tool (port specific), returns the count */
 unsigned hal_swo_status(uint32_t *w, unsigned max);
 /* contiguous received data without copying; consume what was used.

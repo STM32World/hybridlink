@@ -685,6 +685,8 @@ def swo_status(d):
         print(f"dma      CCR {ccr:x}{' (enabled)' if ccr & 1 else ' (disabled)'}, "
               f"CNDTR {cndtr}")
         print(f"pins     GPIOA_CRH {crh:08x}, AFIO_MAPR {mapr:08x}")
+    if len(w) >= 13:
+        print(f"stack    {w[12]} bytes never used since reset")
 
 
 def vcp_status(d):

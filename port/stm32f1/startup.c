@@ -4,6 +4,7 @@
  */
 #include <stdint.h>
 #include "layout.h"
+#include "stm32f1.h"
 
 extern uint32_t _sidata, _sdata, _edata, _sbss, _ebss, _estack;
 extern int main(void);
@@ -65,6 +66,11 @@ void Reset_Handler(void)
         *d++ = *s++;
     for (d = &_sbss; d < &_ebss; )
         *d++ = 0;
+    /* paint the free stack area for hal_stack_unused() */
+    uint32_t sp;
+    __asm volatile ("mov %0, sp" : "=r"(sp));
+    while ((uint32_t)d < sp - 64u)
+        *d++ = STACK_PAINT;
     main();
     for (;;) { }
 }
