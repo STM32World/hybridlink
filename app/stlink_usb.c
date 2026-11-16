@@ -177,12 +177,16 @@ static bool out_step(void)
  *    what is left overflows it. So once polled, only the bytes promised
  *    by the last count are sent.
  *  - streamed (no GET_TRACE_NB): full packets as soon as the host takes
- *    the previous one, a short packet once the line has been quiet. */
+ *    the previous one, a short packet once the line has been quiet.
+ * Up to TRACE_XFER bytes go in one transfer, packet by packet from the USB
+ * interrupt: queued one packet per main loop pass, a loop slowed down by
+ * memory transfers delivered far less than 2 MHz SWO brings in. */
 
-#define TRACE_PKT       32u
+#define TRACE_PKT       32u             /* endpoint packet size */
+#define TRACE_XFER      512u
 #define TRACE_QUIET_MS  5u
 
-static uint8_t trace_pkt[TRACE_PKT];
+static uint8_t trace_pkt[TRACE_XFER];
 static uint32_t trace_inflight;         /* queued on the endpoint        */
 static uint32_t trace_owed;             /* promised, not yet queued      */
 static uint32_t trace_limit;            /* host buffer size, 0: none     */
@@ -236,7 +240,7 @@ static void trace_task(void)
     if (trace_polled) {
         if (!trace_owed)
             return;
-        uint32_t want = trace_owed < TRACE_PKT ? trace_owed : TRACE_PKT;
+        uint32_t want = trace_owed < TRACE_XFER ? trace_owed : TRACE_XFER;
         uint32_t n = trace_fill(want);
         if (n < want)                   /* lost to an overrun: pad with */
             memset(trace_pkt + n, 0, want - n);    /* ITM sync bytes */
@@ -248,7 +252,10 @@ static void trace_task(void)
     bool quiet = trace_quiet(avail);
     if (!avail || (avail < TRACE_PKT && !quiet))
         return;
-    uint32_t n = trace_fill(avail < TRACE_PKT ? avail : TRACE_PKT);
+    /* whole packets while more is coming, the rest once quiet */
+    uint32_t n = avail >= TRACE_XFER ? TRACE_XFER
+               : avail >= TRACE_PKT && !quiet ? avail - avail % TRACE_PKT : avail;
+    n = trace_fill(n);
     trace_seen = hal_swo_available();
     trace_queue(n);
 }

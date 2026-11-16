@@ -530,7 +530,9 @@ Tested on a Jolt Connect against an STM32F407:
 * SWO: 2 Mbaud UART/NRZ trace, sustained full rate (100 KB, ~200 KB/s)
   and paced streams byte exact with a polling host, also with 256-byte
   host reads as OpenOCD does; OpenOCD capture of 8 x 100000 ITM characters
-  at full rate byte exact
+  at full rate byte exact; since 0.7.3 also 200 kB/s while OpenOCD reads
+  memory back to back at 1.8 and 4 MHz SWD (most runs byte exact, an
+  occasional loss when OpenOCD goes about 20 ms without polling trace)
 
 CMSIS-DAP mode, against an RP2354 (RP2350, Raspberry Pi OpenOCD 0.12.0+dev):
 
@@ -602,6 +604,14 @@ Hosts read it in two ways, and both are handled:
   read data!!!"* (fixed in 0.5.1).
 * streamed (no `GET_TRACE_NB`): full packets as soon as the host takes the
   previous one, a short packet after 5 ms of silence.
+
+Trace goes to the host in transfers of up to 512 bytes, whose 32-byte
+packets the USB interrupt sends back to back (since 0.7.3; before, one
+packet per main-loop pass lost trace under SWD load and slowed OpenOCD's
+memory reads). The 4 KiB buffer covers about 20 ms at 2 Mbaud: a host that
+goes longer without asking for trace loses some. OpenOCD does not poll
+while it runs a command, so back-to-back 1 KiB `read_memory` calls over its
+TCL port at 1.8 MHz SWD (about 19 ms each) are right at that limit.
 
 If the host falls more than the buffer behind, the oldest data is dropped.
 OpenOCD 0.12 does not poll trace while it is blocked (`wait_halt`,
