@@ -18,6 +18,8 @@
 /* ---- core / system -------------------------------------------------- */
 void     hal_init(void);                /* clocks, tick, LED, USB pins     */
 uint32_t hal_millis(void);
+void     hal_tick_hook(void);           /* every 1 ms from the tick interrupt;
+                                          weak, empty unless defined      */
 void     hal_delay_us(uint32_t us);
 void     hal_delay_ms(uint32_t ms);
 void     hal_uid(uint32_t uid[3]);      /* 96-bit unique ID                */
@@ -30,8 +32,10 @@ void     hal_usb_init(void);            /* clock, re-enumeration, IRQs     */
 void     hal_usb_disconnect(void);      /* force a bus disconnect          */
 
 /* ---- LED ------------------------------------------------------------ */
-/* bi-colour LED; orange is both colours alternating fast (port) */
-enum hal_led { LED_OFF, LED_RED, LED_GREEN, LED_ORANGE };
+/* two LEDs on one pin (one to the supply, one to ground): one colour, the
+ * other, or off. Red and blue on the Jolt / Streamline Connect (ST's
+ * ST-Link/V2-1 has red and green there). */
+enum hal_led { LED_OFF, LED_RED, LED_BLUE };
 void     hal_led(enum hal_led state);
 
 /* ---- internal flash (bootloader) ------------------------------------ */

@@ -89,9 +89,9 @@
 
 /* keep the string and the numbers in step; make dist / releases use the
  * string, the tool reads the numbers from the probe */
-#define HYBRIDLINK_VERSION  "0.7.1"
+#define HYBRIDLINK_VERSION  "0.7.2"
 #define HYBRIDLINK_VER_MAJOR 0
 #define HYBRIDLINK_VER_MINOR 7
-#define HYBRIDLINK_VER_PATCH 1
+#define HYBRIDLINK_VER_PATCH 2
 
 #endif

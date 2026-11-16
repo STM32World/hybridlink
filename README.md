@@ -435,23 +435,25 @@ the probe's own SWD port; the mapping lives in the port's `swd_io.h`.
 
 ### Status LED
 
-The bi-colour LED behaves like the COM LED of ST's ST-Link/V2-1 (LD1 on
-Nucleo boards, as described in ST's UM1724), in every mode (ST-Link,
-CMSIS-DAP and WCH-Link):
+The Jolt / Streamline Connect has a red and a blue LED on one pin (PA9
+high: red, low: blue, tri-stated: off), so it can show one colour, the
+other or nothing. hybridlink uses them like the COM LED of ST's
+ST-Link/V2-1 (LD1 on Nucleo boards, ST's UM1724), in every mode (ST-Link,
+CMSIS-DAP and WCH-Link), with blue where ST shows green and red where ST
+shows orange:
 
 | LED | Meaning |
 |-----|---------|
 | slow red blink | USB not configured yet |
 | fast red blink | enumerated, no debug software has talked to the probe yet |
-| red | debug software has talked to the probe, no target yet |
-| red/green blink | target communication in progress |
-| green | the last target communication succeeded |
-| orange | the last target communication failed (no answer) |
+| red | debug software has talked to the probe, but no target answered (yet) |
+| red/blue blink | target communication in progress |
+| blue | the last target communication succeeded |
 | off | USB suspended |
 
-The SWD and RVSWD layers report every transfer, so the LED shows the same
-thing whichever host tool is used. The pin level that lights red is
-`LED_RED_LEVEL` in `boards/<board>/board.h`.
+The SWD and RVSWD layers record every transfer; the LED itself is updated
+from the 1 ms tick interrupt, so it keeps blinking during long commands.
+The pin level that lights red is `LED_RED_LEVEL` in `boards/<board>/board.h`.
 
 ### Porting
 
@@ -472,7 +474,7 @@ linker scripts; a new board needs a `boards/<board>/board.h`. Select them with
 | PA2 / PA3 | VCP TX / RX (USART2) |
 | PA10 | SWO (USART1 RX) |
 | PA0 | target voltage (1:2 divider) |
-| PA9 | status LED (high / low / tri-state, see Status LED) |
+| PA9 | status LEDs: high red, low blue, tri-state off (see Status LED) |
 | PA15 | USB D+ pull-up control |
 
 ## Protocol coverage

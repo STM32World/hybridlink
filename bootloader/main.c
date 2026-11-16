@@ -111,7 +111,7 @@ void tud_dfu_download_cb(uint8_t alt, uint16_t block, const uint8_t *data, uint1
     (void)alt;
     uint32_t addr = APP_BASE + (uint32_t)block * CFG_TUD_DFU_XFER_BUFSIZE;
 
-    hal_led(block & 1 ? LED_GREEN : LED_RED);
+    hal_led(block & 1 ? LED_BLUE : LED_RED);
     if (block == 0) {
         manifested = false;
         erased_upto = APP_BASE;
@@ -215,7 +215,7 @@ int main(void)
         if (hal_millis() - blink > 250) {
             blink = hal_millis();
             on = !on;
-            hal_led(on ? LED_GREEN : LED_OFF);
+            hal_led(on ? LED_BLUE : LED_OFF);
         }
         if (st_proto_exit_requested()) {
             image_commit();

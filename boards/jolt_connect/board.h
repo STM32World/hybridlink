@@ -6,7 +6,7 @@
  *   PB14  SWDIO (output driver)   tri-stated while reading
  *   PB12  SWDIO (input sense)
  *   PB0   target NRST (open drain)
- *   PA9   bi-colour status LED (high / low / tri-state)
+ *   PA9   status LEDs: high red, low blue, tri-state off
  *   PA15  USB D+ pull-up control (open drain, low = disconnected)
  *   PA2   VCP TX  (USART2)        PA3  VCP RX  (USART2)
  *   PA10  SWO     (USART1 RX)

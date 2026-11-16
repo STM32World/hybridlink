@@ -13,10 +13,10 @@
 #define LED_TARGET_OK       1
 #define LED_TARGET_FAILED   2
 
-/* written for every target transfer, so kept to two byte stores; led_task
- * picks them up */
-extern uint8_t led_traffic;             /* a transfer took place          */
-extern uint8_t led_result;              /* LED_TARGET_* of the last one   */
+/* written for every target transfer, so kept to two byte stores; the
+ * tick interrupt (led.c) turns them into the LED state */
+extern volatile uint8_t led_traffic;    /* a transfer took place          */
+extern volatile uint8_t led_result;     /* LED_TARGET_* of the last one   */
 
 static inline void led_transfer(bool ok)
 {
@@ -25,6 +25,5 @@ static inline void led_transfer(bool ok)
 }
 
 void led_host(void);            /* host software sent a probe command     */
-void led_task(void);            /* main loop                              */
 
 #endif

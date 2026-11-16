@@ -1,17 +1,20 @@
 /*
- * Status LED, following the COM LED of ST's ST-Link/V2-1 (UM1724, LD1):
+ * Status LED, following the COM LED of ST's ST-Link/V2-1 (UM1724, LD1).
+ * The Jolt / Streamline Connect has a red and a blue LED on one pin (red,
+ * blue or off; never both), so ST's green is blue here and ST's orange
+ * (failure) is red:
  *
  *   slow red blink      USB not configured yet
  *   fast red blink      enumerated, no host software has talked to the probe
- *   red                 host software talked to the probe, no target yet
- *   red/green blink     target communication in progress
- *   green               last target communication succeeded
- *   orange              last target communication failed
+ *   red                 host software talked to the probe, no target yet,
+ *                       or the last target transfer failed
+ *   red/blue blink      target communication in progress
+ *   blue                last target communication succeeded
  *   off                 USB suspended
  *
  * The same in ST-Link, CMSIS-DAP and WCH-Link mode. The SWD and RVSWD
  * layers record every transfer (led.h), the protocol handlers the first
- * command; this task turns that into the LED state.
+ * command; the tick interrupt turns that into the LED state.
  * SPDX-License-Identifier: MIT
  */
 #include "tusb.h"
@@ -23,10 +26,10 @@
 #define BLINK_MS    50u
 #define BUSY_MS     100u        /* traffic this recent blinks red/green */
 
-uint8_t led_traffic;
-uint8_t led_result;
+volatile uint8_t led_traffic;
+volatile uint8_t led_result;
 
-static bool host_seen;
+static volatile bool host_seen;
 static bool busy;
 static uint32_t last_activity;
 static int shown = -1;
@@ -36,7 +39,9 @@ void led_host(void)
     host_seen = true;
 }
 
-void led_task(void)
+/* every 1 ms from the tick interrupt, so the LED keeps blinking while a
+ * long debug command holds up the main loop */
+void hal_tick_hook(void)
 {
     uint32_t now = hal_millis();
     enum hal_led c;
@@ -63,13 +68,11 @@ void led_task(void)
     else if (!host_seen)
         c = (now / FAST_MS) & 1u ? LED_OFF : LED_RED;
     else if (busy && target != LED_TARGET_NONE)
-        c = (now / BLINK_MS) & 1u ? LED_GREEN : LED_RED;
+        c = (now / BLINK_MS) & 1u ? LED_BLUE : LED_RED;
     else if (target == LED_TARGET_OK)
-        c = LED_GREEN;
-    else if (target == LED_TARGET_FAILED)
-        c = LED_ORANGE;
+        c = LED_BLUE;
     else
-        c = LED_RED;
+        c = LED_RED;                    /* no target yet, or it failed */
 
     if ((int)c != shown) {
         shown = (int)c;
