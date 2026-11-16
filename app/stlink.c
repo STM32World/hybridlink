@@ -388,7 +388,6 @@ static uint32_t debug_command(const uint8_t *c, uint8_t *r)
         mem_write32(AIRCR, 0x05FA0004u);
         hal_delay_ms(2);
         swd_clear_errors();
-        mem_read32(DHCSR, &v);          /* clear S_RESET_ST */
         return reply_status(r, STLINK_OK);
 
     case DBG_APIV2_DRIVE_NRST:
