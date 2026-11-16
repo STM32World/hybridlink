@@ -14,6 +14,7 @@
  * SPDX-License-Identifier: MIT
  */
 #include "rvswd.h"
+#include "led.h"
 #include "swd_io.h"
 
 #define STATUS_OK   0x7u
@@ -122,6 +123,13 @@ void rvswd_wake(void)
     stop();
 }
 
+/* feeds the status LED */
+static uint8_t dmi_done(uint8_t st)
+{
+    led_transfer(st == DMI_OK);
+    return st;
+}
+
 uint8_t rvswd_read(uint8_t addr, uint32_t *val)
 {
     for (int i = 0; i < RETRIES; i++) {
@@ -132,11 +140,11 @@ uint8_t rvswd_read(uint8_t addr, uint32_t *val)
         stop();
         if ((tail & 0xFu) == STATUS_OK && ((tail >> 5) & 1u) == parity32(v)) {
             *val = v;
-            return DMI_OK;
+            return dmi_done(DMI_OK);
         }
     }
     *val = 0;
-    return DMI_FAILED;
+    return dmi_done(DMI_FAILED);
 }
 
 uint8_t rvswd_write(uint8_t addr, uint32_t val)
@@ -149,7 +157,7 @@ uint8_t rvswd_write(uint8_t addr, uint32_t val)
         uint32_t st = in_bits(4);
         stop();
         if (st == STATUS_OK)
-            return DMI_OK;
+            return dmi_done(DMI_OK);
     }
-    return DMI_FAILED;
+    return dmi_done(DMI_FAILED);
 }

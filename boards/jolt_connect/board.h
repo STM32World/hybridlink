@@ -34,6 +34,7 @@
 
 #define LED_PORT            GPIOA_BASE
 #define LED_PIN             9
+#define LED_RED_LEVEL       1               /* pin level that lights red */
 
 #define USB_RENUM_PORT      GPIOA_BASE
 #define USB_RENUM_PIN       15

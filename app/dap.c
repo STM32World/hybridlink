@@ -12,6 +12,7 @@
 #include "swd.h"
 #include "swd_io.h"
 #include "hal.h"
+#include "led.h"
 #include "usb_ids.h"
 #include "usb_serial.h"
 
@@ -360,8 +361,7 @@ static uint32_t execute_one(const uint8_t *q, uint32_t qlen, uint8_t *r, uint32_
         return RESULT(2, cmd_info(q[1], r));
 
     case ID_HOST_STATUS:
-        if (q[1] == 0)
-            hal_led(q[2] ? LED_ACTIVE : LED_IDLE);
+        /* the LED follows the ST-Link scheme (led.c), not the host */
         r[1] = DAP_OK;
         return RESULT(3, 2);
 
@@ -377,7 +377,6 @@ static uint32_t execute_one(const uint8_t *q, uint32_t qlen, uint8_t *r, uint32_
 
     case ID_DISCONNECT:
         swd_disconnect();
-        hal_led(LED_IDLE);
         r[1] = DAP_OK;
         return RESULT(1, 2);
 
@@ -554,6 +553,7 @@ uint32_t dap_execute(const uint8_t *req, uint32_t req_len, uint8_t *resp)
 {
     if (req_len == 0)
         return 0;
+    led_host();
     if (req[0] == ID_EXECUTE_COMMANDS || req[0] == ID_QUEUE_COMMANDS) {
         unsigned n = req[1];
         const uint8_t *q = req + 2;

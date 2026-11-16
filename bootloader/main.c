@@ -111,7 +111,7 @@ void tud_dfu_download_cb(uint8_t alt, uint16_t block, const uint8_t *data, uint1
     (void)alt;
     uint32_t addr = APP_BASE + (uint32_t)block * CFG_TUD_DFU_XFER_BUFSIZE;
 
-    hal_led(block & 1 ? LED_ACTIVE : LED_IDLE);
+    hal_led(block & 1 ? LED_GREEN : LED_RED);
     if (block == 0) {
         manifested = false;
         erased_upto = APP_BASE;
@@ -138,7 +138,7 @@ void tud_dfu_manifest_cb(uint8_t alt)
         return;
     }
     manifested = true;
-    hal_led(LED_IDLE);
+    hal_led(LED_RED);
     tud_dfu_finish_flashing(image_valid() ? DFU_STATUS_OK : DFU_STATUS_ERR_FIRMWARE);
 }
 
@@ -215,7 +215,7 @@ int main(void)
         if (hal_millis() - blink > 250) {
             blink = hal_millis();
             on = !on;
-            hal_led(on ? LED_ACTIVE : LED_OFF);
+            hal_led(on ? LED_GREEN : LED_OFF);
         }
         if (st_proto_exit_requested()) {
             image_commit();

@@ -13,6 +13,7 @@
 #include "rvdm.h"
 #include "wch_flash.h"
 #include "hal.h"
+#include "led.h"
 
 #define CMD_SET_WRITE_REGION 0x01
 #define CMD_PROGRAM          0x02
@@ -247,6 +248,7 @@ uint16_t wch_execute(const uint8_t *q, uint16_t len, uint8_t *r)
 {
     if (len < 3 || q[0] != 0x81)
         return unknown(r);
+    led_host();
     const uint8_t *p = &q[3];
     uint16_t n = len - 3u;
     switch (q[1]) {

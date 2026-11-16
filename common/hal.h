@@ -30,7 +30,8 @@ void     hal_usb_init(void);            /* clock, re-enumeration, IRQs     */
 void     hal_usb_disconnect(void);      /* force a bus disconnect          */
 
 /* ---- LED ------------------------------------------------------------ */
-enum hal_led { LED_OFF, LED_IDLE, LED_ACTIVE, LED_BOTH };
+/* bi-colour LED; orange is both colours alternating fast (port) */
+enum hal_led { LED_OFF, LED_RED, LED_GREEN, LED_ORANGE };
 void     hal_led(enum hal_led state);
 
 /* ---- internal flash (bootloader) ------------------------------------ */

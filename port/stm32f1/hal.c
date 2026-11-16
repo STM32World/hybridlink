@@ -33,10 +33,21 @@
 #define DMA_CCR_MINC    (1u << 7)
 
 static volatile uint32_t ticks;
+static volatile bool led_orange;
+
+static void led_level(bool high)
+{
+    if (high)
+        GPIO_BSRR(LED_PORT) = 1u << LED_PIN;
+    else
+        GPIO_BRR(LED_PORT) = 1u << LED_PIN;
+}
 
 void SysTick_Handler(void)
 {
     ticks++;
+    if (led_orange)                     /* red and green at 500 Hz */
+        led_level(ticks & 1u);
 }
 
 uint32_t hal_millis(void)
@@ -124,7 +135,7 @@ void hal_init(void)
     /* SWD only: frees PA15, PB3 and PB4 */
     AFIO_MAPR = (AFIO_MAPR & ~(7u << 24)) | (2u << 24);
 
-    hal_led(LED_IDLE);
+    hal_led(LED_RED);
 }
 
 void hal_jump(uint32_t vt)
@@ -161,16 +172,19 @@ void hal_jump(uint32_t vt)
 /* LED                                                                */
 /* ------------------------------------------------------------------ */
 
+/* the pin drives one colour high, the other low, neither tri-stated */
 void hal_led(enum hal_led s)
 {
+    led_orange = false;
     switch (s) {
-    case LED_IDLE:
-        GPIO_BSRR(LED_PORT) = 1u << LED_PIN;
+    case LED_RED:
+    case LED_GREEN:
+        led_level((s == LED_RED) == (LED_RED_LEVEL != 0));
         gpio_mode(LED_PORT, LED_PIN, GPIO_OUT_PP_2);
         break;
-    case LED_ACTIVE:
-        GPIO_BRR(LED_PORT) = 1u << LED_PIN;
+    case LED_ORANGE:
         gpio_mode(LED_PORT, LED_PIN, GPIO_OUT_PP_2);
+        led_orange = true;
         break;
     default:
         gpio_mode(LED_PORT, LED_PIN, GPIO_IN_FLOAT);

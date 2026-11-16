@@ -10,6 +10,7 @@
 #include "swd.h"
 #include "swd_io.h"
 #include "hal.h"
+#include "led.h"
 
 #define DP_IDCODE   0x00   /* read  */
 #define DP_ABORT    0x00   /* write */
@@ -132,7 +133,7 @@ static inline uint32_t parity32(uint32_t v)
 }
 
 /* one raw transfer; req bits: 0 APnDP, 1 RnW, 2..3 A[3:2] (= address bits) */
-static unsigned transfer(unsigned req, uint32_t *data)
+static unsigned transfer_bits(unsigned req, uint32_t *data)
 {
     unsigned r = 0x81u | ((req & 0xFu) << 1) | (parity32(req & 0xFu) << 5);
 
@@ -171,6 +172,20 @@ static unsigned transfer(unsigned req, uint32_t *data)
     swd_io_dio_output();
     write_bits(0, 2);
     return SWD_ERR_NOACK;
+}
+
+/* every SWD transfer, with the status LED fed: no ACK or a parity error
+ * means the target is not answering, OK that it is */
+static unsigned transfer(unsigned req, uint32_t *data)
+{
+    unsigned ack = transfer_bits(req, data);
+    if (ack == SWD_ACK_OK)
+        led_transfer(true);
+    else if (ack == SWD_ERR_NOACK || ack == SWD_ERR_PARITY)
+        led_transfer(false);
+    else
+        led_traffic = 1;
+    return ack;
 }
 
 static unsigned transfer_retry(unsigned req, uint32_t *data)

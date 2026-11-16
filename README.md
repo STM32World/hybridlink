@@ -433,6 +433,26 @@ the request down to 5 kHz. A port measures its own timing with the
 per bit for a range of delays in `swd_cal[]` at start-up, to be read over
 the probe's own SWD port; the mapping lives in the port's `swd_io.h`.
 
+### Status LED
+
+The bi-colour LED behaves like the COM LED of ST's ST-Link/V2-1 (LD1 on
+Nucleo boards, as described in ST's UM1724), in every mode (ST-Link,
+CMSIS-DAP and WCH-Link):
+
+| LED | Meaning |
+|-----|---------|
+| slow red blink | USB not configured yet |
+| fast red blink | enumerated, no debug software has talked to the probe yet |
+| red | debug software has talked to the probe, no target yet |
+| red/green blink | target communication in progress |
+| green | the last target communication succeeded |
+| orange | the last target communication failed (no answer) |
+| off | USB suspended |
+
+The SWD and RVSWD layers report every transfer, so the LED shows the same
+thing whichever host tool is used. The pin level that lights red is
+`LED_RED_LEVEL` in `boards/<board>/board.h`.
+
 ### Porting
 
 Everything outside `port/` and `boards/` only uses
@@ -452,7 +472,7 @@ linker scripts; a new board needs a `boards/<board>/board.h`. Select them with
 | PA2 / PA3 | VCP TX / RX (USART2) |
 | PA10 | SWO (USART1 RX) |
 | PA0 | target voltage (1:2 divider) |
-| PA9 | status LED |
+| PA9 | status LED (high / low / tri-state, see Status LED) |
 | PA15 | USB D+ pull-up control |
 
 ## Protocol coverage

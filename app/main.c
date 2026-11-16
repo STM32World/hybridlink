@@ -12,6 +12,7 @@
 #include "stlink.h"
 #include "dap.h"
 #include "wch.h"
+#include "led.h"
 
 void stlink_usb_task(void);
 void dap_usb_task(void);
@@ -62,6 +63,7 @@ int main(void)
             stlink_usb_task();
         vcp_task();
         settings_task();
+        led_task();
         enum settings_restart r = settings_restart_requested();
         if (r != RESTART_NONE)
             restart(r == RESTART_DFU);

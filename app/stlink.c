@@ -12,6 +12,7 @@
 #include "stlink_status.h"
 #include "swd.h"
 #include "hal.h"
+#include "led.h"
 #include "usb_ids.h"
 #include "settings.h"
 
@@ -340,7 +341,6 @@ static uint32_t debug_command(const uint8_t *c, uint8_t *r)
         if (c[2] != DBG_ENTER_SWD)
             return reply_status(r, STLINK_NO_DEVICE);   /* SWD only */
         mode = STLINK_MODE_DEBUG;
-        hal_led(LED_ACTIVE);
         st = swd_connect(&idcode);
         if (st == STLINK_OK)
             st = mem_ap_init(0);
@@ -353,7 +353,6 @@ static uint32_t debug_command(const uint8_t *c, uint8_t *r)
     case DBG_EXIT:
         swd_disconnect();
         mode = STLINK_MODE_MASS;
-        hal_led(LED_IDLE);
         return 0;
 
     case DBG_READCOREID:
@@ -568,6 +567,7 @@ void stlink_execute(const uint8_t *c, uint8_t *r, uint32_t *rlen)
     uint16_t ver = version_reported();
 
     *rlen = 0;
+    led_host();
     switch (c[0]) {
     case STLINK_GET_VERSION:
         r[0] = ver >> 8;
