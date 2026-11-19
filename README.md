@@ -297,6 +297,23 @@ dfu-util -d 0483:3748 -a 0 -D build/app.bin -R
 The usual ST-Link udev rules (as shipped with STM32CubeIDE / stlink) already
 cover `0483:3748`, so no extra rule is needed.
 
+`update` replaces only the application; the bootloader changes only with
+`install`. To see which versions are on a probe:
+
+```bash
+hybridlink version
+```
+
+```
+serial      066CFF3632504E3043053243
+bootloader  hybridlink 0.8.1
+application hybridlink 0.8.1
+```
+
+It works in every mode and also while the probe is in its bootloader. From
+0.8.1 on each image carries its version in a reserved vector table slot
+(`0x34`); older images show as "older than 0.8.1", ST's firmware as such.
+
 `hybridlink-full.bin` covers `0x08000000-0x08003FFF` including the
 configuration page; flash `bootloader.bin` and `app.bin` separately to keep
 a configuration page written by ST's updater.

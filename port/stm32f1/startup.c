@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include "layout.h"
 #include "stm32f1.h"
+#include "usb_ids.h"
 
 extern uint32_t _sidata, _sdata, _edata, _sbss, _ebss, _estack;
 extern int main(void);
@@ -44,7 +45,8 @@ void (* const vector_table[16 + 43])(void) = {
     (void (*)(void))HL_IMAGE_MAGIC, 0, 0, 0,  /* reserved; marks hybridlink */
     SVC_Handler,
     DebugMon_Handler,
-    0,
+    (void (*)(void))HL_IMAGE_VERSION(HYBRIDLINK_VER_MAJOR,  /* reserved */
+        HYBRIDLINK_VER_MINOR, HYBRIDLINK_VER_PATCH),
     PendSV_Handler,
     SysTick_Handler,
     [16 + 16] = DMA1_Channel6_IRQHandler,

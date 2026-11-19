@@ -6,6 +6,7 @@
 #include "tusb.h"
 #include "usb_ids.h"
 #include "usb_serial.h"
+#include "settings.h"
 
 static const tusb_desc_device_t dev_desc = {
     .bLength            = sizeof(tusb_desc_device_t),
@@ -73,4 +74,22 @@ const uint16_t *tud_descriptor_string_cb(uint8_t index, uint16_t langid)
     if (index >= sizeof(strings) / sizeof(strings[0]))
         return NULL;
     return usb_string_desc(buf, 32, strings[index]);
+}
+
+/* IMAGES, as in the application (settings.h), so the tool can tell the
+ * versions while the probe is in the bootloader */
+bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage,
+                                tusb_control_request_t const *req)
+{
+    static uint32_t buf[2];
+    if (req->bmRequestType_bit.recipient != TUSB_REQ_RCPT_DEVICE ||
+        req->bmRequestType_bit.direction != TUSB_DIR_IN ||
+        req->wIndex != HL_REQ_MAGIC || req->bRequest != HL_REQ_IMAGES)
+        return false;
+    if (stage != CONTROL_STAGE_SETUP)
+        return true;
+    buf[0] = hl_image_version(BOOT_BASE);   /* little endian already */
+    buf[1] = hl_image_version(APP_BASE);
+    return tud_control_xfer(rhport, req, buf,
+                            req->wLength < sizeof buf ? req->wLength : sizeof buf);
 }

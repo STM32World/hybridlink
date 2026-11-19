@@ -2,6 +2,9 @@
 """hybridlink host helper.
 
   hybridlink info  [--serial SN]   show version / mode / target voltage
+  hybridlink version [--serial SN] show the installed bootloader and
+                                      application versions (also while the
+                                      probe is in its bootloader)
   hybridlink dfu   [--serial SN]   switch the probe into the DFU bootloader
   hybridlink update [app.bin] [--serial SN]
                                       switch to the bootloader and flash the
@@ -55,6 +58,7 @@ HL_REQ_VCP_STATUS = 0x09
 HL_REQ_GET_MODE = 0x03
 HL_REQ_SET_MODE = 0x04
 HL_REQ_ENTER_DFU = 0x05
+HL_REQ_IMAGES = 0x0A
 HL_REQ_MAGIC = 0x484C
 
 
@@ -167,6 +171,54 @@ def info(d):
     r = cmd(d, [0xF7], 8)
     a, b = int.from_bytes(r[0:4], "little"), int.from_bytes(r[4:8], "little")
     print(f"target   {2 * 1.2 * b / a:.2f} V" if a else "target   n/a")
+
+
+def hl_images(d):
+    """(bootloader, application) version words, or None before 0.8.1"""
+    try:
+        r = bytes(d.ctrl_transfer(0xC0, HL_REQ_IMAGES, 0, HL_REQ_MAGIC, 8, 1000))
+    except usb.core.USBError:
+        return None
+    if len(r) != 8:
+        return None
+    return int.from_bytes(r[0:4], "little"), int.from_bytes(r[4:8], "little")
+
+
+def image_str(w, what):
+    if w == 0xFFFFFFFF:
+        return "not hybridlink (ST's or other firmware)" if what == "bootloader" \
+            else "none (no hybridlink application installed)"
+    if w == 0:
+        return "hybridlink, older than 0.8.1 (does not record its version)"
+    return f"hybridlink {(w >> 16) & 0xFF}.{(w >> 8) & 0xFF}.{w & 0xFF}"
+
+
+def version(d):
+    """installed bootloader and application versions"""
+    print(f"serial      {d.serial_number}")
+    im = hl_images(d)
+    if im:
+        print(f"bootloader  {image_str(im[0], 'bootloader')}")
+        print(f"application {image_str(im[1], 'application')}")
+        if d.idProduct == BOOT_PID:
+            print("running     bootloader")
+        return
+    if d.idProduct == BOOT_PID:             # a bootloader before 0.8.1, or ST's
+        if interfaces(d) == 2:
+            print("bootloader  hybridlink, older than 0.8.1 (cannot tell its version)")
+        else:
+            print("bootloader  ST's")
+        print("application unknown while the probe is in this bootloader")
+        print("running     bootloader")
+        return
+    o = hl_versions(d)
+    if o is None:
+        v = cmd(d, [0xF1, 0x80], 6)
+        print("bootloader  unknown while ST's firmware runs (hybridlink dfu, then version)")
+        print(f"application ST's firmware, {vstr((v[0] << 8) | v[1])}")
+        return
+    print("bootloader  unknown (the application is older than 0.8.1 and cannot tell)")
+    print(f"application hybridlink {o[3]}")
 
 
 def enter_dfu(d):
@@ -713,7 +765,7 @@ def vcp_status(d):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("action", choices=("info", "dfu", "update", "install", "set-type",
+    ap.add_argument("action", choices=("info", "version", "dfu", "update", "install", "set-type",
                                        "set-version", "swo-status", "vcp-status"))
     ap.add_argument("arg", nargs="?",
                     help="image for update, stlink|dap|wch for set-type, version for set-version")
@@ -731,6 +783,9 @@ def main():
     sn = d.serial_number
     if a.action == "info":
         info(d)
+        return
+    if a.action == "version":
+        version(d)
         return
     if a.action == "swo-status":
         swo_status(d)

@@ -26,6 +26,9 @@
  *                    received from the target UART, delivered to the host,
  *                    dropped (host did not read in time), then port
  *                    specific registers (hal_vcp_status)
+ *   IN  IMAGES       8 bytes (from 0.8.1 on, also answered by the bootloader):
+ *                    hl_image_version() of the bootloader, then of the
+ *                    application, 32-bit little endian each
  *
  * SPDX-License-Identifier: MIT
  */
@@ -46,6 +49,7 @@
 #define HL_REQ_RVSWD_RUN   0x07          /* RVSWD_RAW builds only */
 #define HL_REQ_RVSWD_RES   0x08
 #define HL_REQ_VCP_STATUS  0x09
+#define HL_REQ_IMAGES      0x0A
 #define HL_REQ_MAGIC       0x484C          /* "HL" */
 
 bool rvswd_raw_request(uint8_t rhport, uint8_t stage, const void *request);

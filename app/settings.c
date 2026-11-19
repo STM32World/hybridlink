@@ -90,6 +90,16 @@ bool settings_vendor_request(uint8_t rhport, uint8_t stage, const void *request)
                 return false;
             n = 4u * hal_swo_status((uint32_t *)buf, sizeof buf / 4u);
             break;
+        case HL_REQ_IMAGES:
+            if (!in)
+                return false;
+            n = 8;
+            for (unsigned i = 0; i < 2; i++) {
+                uint32_t w = hl_image_version(i ? APP_BASE : BOOT_BASE);
+                for (unsigned b = 0; b < 4; b++)
+                    buf[4u * i + b] = (uint8_t)(w >> (8u * b));
+            }
+            break;
         case HL_REQ_VCP_STATUS:
             if (!in)
                 return false;
