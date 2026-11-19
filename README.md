@@ -52,7 +52,7 @@ The firmware has two parts:
   layout without mass storage:
   * IF0 vendor debug interface: EP1 OUT/IN (64), EP2 IN trace (32)
   * IF1/IF2 CDC ACM virtual COM port (IAD): EP4 notify, EP5 data
-* Firmware version `V2J48M35` by default (configurable, see below), serial = the 96-bit UID as 24 hex digits,
+* Firmware version `V2J49M36` by default (configurable, see below), serial = the 96-bit UID as 24 hex digits,
   just like a genuine V2-1.
 * Recognised as an ST-Link by STM32CubeIDE (ST-LINK_gdbserver),
   STM32CubeProgrammer, OpenOCD and the stlink tools.
@@ -346,6 +346,11 @@ firmware versions:
 | 7.10.0 | STM32CubeCLT 1.18 | J45 | – |
 | (2.2.400 plugin) | STM32CubeIDE 2.1.x | J46 | – |
 | 7.14.0 | STM32CubeIDE 2.2.0 | – | J46 |
+| 7.14.0 | STM32CubeIDE 2.3.0 | – | – |
+
+STM32CubeIDE 2.3.0's gdbserver accepts J48, but the IDE wants the version
+its ST-LinkUpgrade ships, V2J49M36 (the updater calls a probe reporting it
+up to date), so that is the default since 0.8.0.
 
 Reporting a higher version than ST ships changes nothing else: gdbserver
 and STM32CubeProgrammer send the same commands at J48 and at J63.
@@ -353,7 +358,8 @@ and STM32CubeProgrammer send the same commands at J48 and at J63.
 So the reported version is a setting, not part of the build. It is the
 last halfword of the configuration page (`0x08003FFE`, big endian), the same
 place ST's updater records the version it installed; while it is blank
-(`0xFFFF`) the compiled-in default (V2J48M35) is reported. The bootloader
+(`0xFFFF`) the compiled-in default (V2J49M36 since 0.8.0, V2J48M35 before)
+is reported. The bootloader
 reports the same word to ST-LinkUpgrade. Changing it needs no ST firmware
 and no rebuild:
 

@@ -26,16 +26,17 @@
 #define DFU_USB_PID         0x3748
 #endif
 
-/* Default reported ST-Link firmware version (V2 J48 M35, same as a current
- * V2-1); the configuration page can override it, see settings.h */
+/* Default reported ST-Link firmware version (V2 J49 M36, what the
+ * ST-LinkUpgrade of STM32CubeIDE 2.3.0 installs on a V2-1); the
+ * configuration page can override it, see settings.h */
 #ifndef STLINK_VER_STLINK
 #define STLINK_VER_STLINK   2
 #endif
 #ifndef STLINK_VER_JTAG
-#define STLINK_VER_JTAG     48
+#define STLINK_VER_JTAG     49
 #endif
 #ifndef STLINK_VER_MSD
-#define STLINK_VER_MSD      35
+#define STLINK_VER_MSD      36
 #endif
 
 /* CMSIS-DAP mode. Tools find CMSIS-DAP probes by "CMSIS-DAP" in the
@@ -89,9 +90,9 @@
 
 /* keep the string and the numbers in step; make dist / releases use the
  * string, the tool reads the numbers from the probe */
-#define HYBRIDLINK_VERSION  "0.7.4"
+#define HYBRIDLINK_VERSION  "0.8.0"
 #define HYBRIDLINK_VER_MAJOR 0
-#define HYBRIDLINK_VER_MINOR 7
-#define HYBRIDLINK_VER_PATCH 4
+#define HYBRIDLINK_VER_MINOR 8
+#define HYBRIDLINK_VER_PATCH 0
 
 #endif
