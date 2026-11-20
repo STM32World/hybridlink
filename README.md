@@ -500,6 +500,50 @@ linker scripts; a new board needs a `boards/<board>/board.h`. Select them with
 | PA9 | status LEDs: high red, low blue, tri-state off (see Status LED) |
 | PA15 | USB D+ pull-up control |
 
+## Hybridlink on Blue Pill
+
+> **Untested speculation.** Nobody has run hybridlink on a Blue Pill yet. This
+> section is reasoning from the schematics and the firmware; reports are welcome.
+
+The firmware runs unchanged on a plain STM32F103C8/CB "Blue Pill" (8 MHz
+crystal; the 47 KB full image also fits a 64 KB C8), but the board lacks a few
+parts of the Jolt Connect, and one of them is essential (see below).
+
+Since 64 KB of flash is enough, it will probably also run on STM32F103
+clones such as the GD32F103 or HK32F103, which turn up on many Blue Pills;
+again untested. The SWD clock is calibrated in CPU cycles on a genuine
+STM32F103, so on a clone with different flash wait states the actual SWD
+frequencies may differ somewhat.
+
+What the Blue Pill lacks:
+
+- **SWDIO uses two pins.** PB14 drives SWDIO and PB12 reads it back (as on
+  ST's ST-Link/V2-1). On a bare Blue Pill PB12 is not connected to anything, so
+  every acknowledge reads as garbage and no target is detected. Connect PB14
+  to PB12 through a 100 Ω resistor (R8 on the Jolt Connect) and take the
+  target's SWDIO from the PB12 side. A plain wire would also do, since PB14 is
+  tri-stated while reading; the resistor limits the current if host and
+  target ever drive at the same time.
+- **SWCLK** is PB13 (the Jolt Connect has 100 Ω, R11, in series). PA5 is kept
+  as an input and can stay unconnected.
+- **NRST** is PB0 (open drain), **SWO** PA10, **VCP** TX PA2 / RX PA3.
+- **Target voltage** is read on PA0 through a 1:2 divider (100k/100k). Without
+  it the reported voltage is meaningless; the firmware only reports it and
+  never refuses to connect, but some host tools warn about a 0 V target.
+- **Status LED**: PA9 drives two LEDs (high red, low blue). The Blue Pill's own
+  LED on PC13 is not used.
+- **USB re-enumeration**: the Blue Pill's D+ pull-up is fixed, so PA15 does
+  nothing. The firmware also drives D+ (PA12) low for 20 ms before starting
+  USB, which should be enough for the host to see a re-enumeration after a mode
+  change or DFU. Many Blue Pills have a 10 kΩ pull-up (R10) where USB wants
+  1.5 kΩ; if the host does not enumerate the board reliably, fix that first.
+
+A blank Blue Pill has no USB bootloader, so the first install is
+`build/hybridlink-full.bin` at `0x08000000`, either with another SWD probe
+(`st-flash write build/hybridlink-full.bin 0x08000000`) or through ST's serial
+bootloader on USART1 (BOOT0 high, PA9/PA10, e.g. `stm32flash`). Afterwards
+`hybridlink update` works over USB as usual.
+
 ## Protocol coverage
 
 Implemented: `F1` version, `F5` mode, `F7` target voltage, `F3 07` DFU exit,
