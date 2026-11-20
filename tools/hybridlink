@@ -62,9 +62,26 @@ HL_REQ_IMAGES = 0x0A
 HL_REQ_MAGIC = 0x484C
 
 
-def serial_of(d, errors=None):
+def raw_serial(d):
+    """ST's ST-Link/V2 firmware and bootloader send the UID bytes raw"""
     try:
-        return d.serial_number
+        s = d.serial_number
+    except (usb.core.USBError, ValueError):
+        return False
+    return bool(s) and len(s) == 12 and not s.isalnum() and all(ord(c) < 256 for c in s)
+
+
+def serial_of(d, errors=None):
+    """the serial number as hybridlink reports it. ST's ST-Link/V2 firmware
+    and bootloader (also on the cheap clones) send the 12 UID bytes raw, one
+    character each; hybridlink and the V2-1 show them as hex with every
+    32-bit word byte-reversed, so the probe keeps one serial throughout"""
+    try:
+        s = d.serial_number
+        if raw_serial(d):
+            raw = bytes(ord(c) for c in s)
+            s = "".join(raw[i:i + 4][::-1].hex().upper() for i in range(0, 12, 4))
+        return s
     except (usb.core.USBError, ValueError) as e:
         if errors is not None:
             errors.append(f"{d.idVendor:04x}:{d.idProduct:04x} on bus {d.bus} "
@@ -146,7 +163,7 @@ def hl_mode(d):
 
 
 def info(d):
-    print(f"serial   {d.serial_number}")
+    print(f"serial   {serial_of(d)}")
     m = hl_mode(d)
     if m is not None:
         print(f"mode     {MODE_NAMES.get(m, m)}")
@@ -165,6 +182,9 @@ def info(d):
               f"default {vstr(o[2])}")
     print(f"st mode  {cmd(d, [0xF5], 2)[0]}")
     if d.idProduct == 0x3748:
+        if st_v2_app(d):
+            print("state    ST-Link/V2 firmware")
+            return
         kind = "hybridlink" if interfaces(d) == 2 else "ST"
         print(f"state    {kind} bootloader")
         return
@@ -195,7 +215,7 @@ def image_str(w, what):
 
 def version(d):
     """installed bootloader and application versions"""
-    print(f"serial      {d.serial_number}")
+    print(f"serial      {serial_of(d)}")
     im = hl_images(d)
     if im:
         print(f"bootloader  {image_str(im[0], 'bootloader')}")
@@ -353,10 +373,34 @@ def st_op(d, op, addr):
     st_dnload(d, 0, bytes([op]) + addr.to_bytes(4, "little"))
 
 
+def st_hello(d):
+    """the version and mode commands every ST tool starts with. ST's V2
+    bootloader (the cheap clones) sometimes stalls them right after it
+    re-enumerated, until a USB reset; returns the device to use"""
+    for retry in (False, True):
+        try:
+            cmd(d, [0xF1, 0x80], 6)
+            cmd(d, [0xF5], 2)
+            return d
+        except usb.core.USBError:
+            if retry:
+                raise
+        bus, ports = d.bus, d.port_numbers
+        try:
+            d.reset()
+        except usb.core.USBError:
+            pass
+        usb.util.dispose_resources(d)
+        time.sleep(1.0)
+        d = usb.core.find(idVendor=ST_VID, idProduct=BOOT_PID, custom_match=lambda x:
+                          x.bus == bus and x.port_numbers == ports)
+        if d is None:
+            sys.exit("the probe left its bootloader after a USB reset")
+
+
 def st_upload(d, image, base=0x08004000):
     """write image at base through the ST update protocol and leave"""
-    cmd(d, [0xF1, 0x80], 6)
-    cmd(d, [0xF5], 2)
+    d = st_hello(d)
     info = cmd(d, [0xF3, 0x08], 20)
     key = st_device_key(info)
     flash_end = 0x08000000 + int.from_bytes(info[0:2], "little") * 1024
@@ -391,8 +435,7 @@ def st_upload(d, image, base=0x08004000):
 
 def st_leave(d):
     """make ST's bootloader start the application"""
-    cmd(d, [0xF1, 0x80], 6)
-    cmd(d, [0xF5], 2)
+    d = st_hello(d)
     try:
         cmd(d, [0xF3, 0x07])
     except usb.core.USBError:
@@ -401,7 +444,19 @@ def st_leave(d):
 
 
 def in_st_bootloader(d):
-    return d.idProduct == BOOT_PID and interfaces(d) == 1
+    return d.idProduct == BOOT_PID and interfaces(d) == 1 and not st_v2_app(d)
+
+
+def st_v2_app(d):
+    """ST's ST-Link/V2 firmware (the cheap clones run it too) has the
+    bootloader's USB ID; it reports a mode other than 0 (DFU)"""
+    return (d.idProduct == BOOT_PID and interfaces(d) == 1
+            and cmd(d, [0xF5], 2)[0] != 0)
+
+
+V2_REPLUG = ("ST's ST-Link/V2 firmware cannot switch to its bootloader by command\n"
+             "(STLinkUpgrade asks for the same): unplug the probe, plug it in again\n"
+             "and run this right away, before any other ST-Link tool starts the firmware")
 
 
 # ---- DAPLink -----------------------------------------------------------------
@@ -518,6 +573,8 @@ def install(sn, installer, app):
         if not os.path.isfile(f):
             sys.exit(f"{f} not found (run make, or make install)")
     d = find(sn)
+    if st_v2_app(d):
+        sys.exit(V2_REPLUG)
     if d.idProduct != BOOT_PID:
         print("switching the probe to its bootloader")
         enter_dfu(d)
@@ -526,7 +583,8 @@ def install(sn, installer, app):
     if d is None:
         sys.exit("the probe did not show up in its bootloader")
     kind = "hybridlink" if interfaces(d) == 2 else "ST"
-    print(f"{kind} bootloader found, uploading the installer")
+    v2 = raw_serial(d)                      # ST-Link/V2 (e.g. the cheap clones)
+    print(f"{kind}{'-Link/V2' if v2 else ''} bootloader found, uploading the installer")
     st_upload(d, open(installer, "rb").read())
 
     print("installing the hybridlink bootloader")
@@ -541,7 +599,7 @@ def install(sn, installer, app):
               "application under it")
         st_upload(d, open(app, "rb").read())
         time.sleep(2.0)
-        reset_old_version(sn)
+        reset_old_version(sn, v2)
         info(find(sn, wait=8.0))
         print("hybridlink runs under ST's bootloader: update, set-type and\n"
               "set-version work as usual; STLinkUpgrade restores ST's firmware")
@@ -551,7 +609,7 @@ def install(sn, installer, app):
     if not dfu_flash(sn, app):
         sys.exit("dfu-util failed")
     time.sleep(2.0)
-    reset_old_version(sn)
+    reset_old_version(sn, v2)
     info(find(sn, wait=8.0))
 
 
@@ -560,14 +618,17 @@ def install(sn, installer, app):
 MIN_J = 46          # CubeIDE 2.1 refuses older, CubeCLT 1.18 refuses < J45
 
 
-def reset_old_version(sn):
+def reset_old_version(sn, v2=False):
     """ST's updater leaves the version of the firmware it installed in the
     configuration page, which hybridlink then reports; after install, an
-    old one (e.g. J32 from an early probe) goes back to the default"""
+    old one (e.g. J32 from an early probe) goes back to the default. So
+    does an ST-Link/V2 one (v2): its last field is the SWIM version, which
+    under the V2-1 identity reads as MSD and makes OpenOCD refuse the probe"""
     d = find(sn, wait=8.0)
     o = hl_versions(d)
-    if o and o[1] not in (0xFFFF, 0) and (o[1] >> 6) & 0x3F < MIN_J:
-        print(f"reported version {vstr(o[1])} is too old for ST's tools, "
+    if o and o[1] not in (0xFFFF, 0) and (v2 or (o[1] >> 6) & 0x3F < MIN_J):
+        why = "is from ST-Link/V2 firmware" if v2 else "is too old for ST's tools"
+        print(f"reported version {vstr(o[1])} {why}, "
               f"using the default {vstr(o[2])}")
         d.ctrl_transfer(0x40, HL_REQ_SET_VERSION, 0xFFFF, HL_REQ_MAGIC, None, 1000)
         time.sleep(0.5)
@@ -780,7 +841,7 @@ def main():
             install_daplink(dl[0], a.arg or image_path("hybridlink-daplink.bin"))
             return
     d = find(a.serial)
-    sn = d.serial_number
+    sn = serial_of(d)
     if a.action == "info":
         info(d)
         return
@@ -817,6 +878,8 @@ def main():
         a.arg = a.arg or image_path("app.bin")
         if not os.path.isfile(a.arg):
             sys.exit(f"{a.arg} not found (run make, or make install)")
+    if st_v2_app(d):
+        sys.exit(V2_REPLUG)
     if d.idProduct != BOOT_PID:
         enter_dfu(d)
         time.sleep(1.0)

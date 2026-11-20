@@ -230,11 +230,15 @@ uses), and lets it run. The installer is an ordinary application at
 `0x08004000` that carries the hybridlink bootloader. It:
 
 * does nothing if the bootloader is already the one it carries;
-* refuses if the bootloader area is read or write protected (option bytes;
-  many ST-Links leave the factory with read protection on). In that case it
-  erases the "application valid" marker in the last flash word, so ST's
-  bootloader stays in update mode, and the tool installs `app.bin` under
-  ST's bootloader instead (see below);
+* refuses if the bootloader area is protected: write protection in the
+  option bytes, or read protection (many ST-Links leave the factory with it
+  on), which on ST's STM32F103 also makes the first 4 KiB unwritable. With
+  read protection set it checks those pages with a write that changes no
+  bit (a halfword programmed with the value it already has) and goes ahead
+  only if all of them accept it, for an F103 clone that does not enforce
+  the rule. When it refuses it erases the "application valid" marker in
+  the last flash word, so ST's bootloader stays in update mode, and the
+  tool installs `app.bin` under ST's bootloader instead (see below);
 * otherwise writes the bootloader page by page, the vector table page last,
   and restarts into the new bootloader's DFU mode.
 
@@ -242,7 +246,10 @@ The tool then installs `app.bin` with dfu-util (`--app` picks another
 image). The configuration page is left alone, so the probe mode and the
 reported version survive; a version older than J46 (ST's updater leaves
 the version it installed there, e.g. J32 on early probes) is reset to the
-default, which ST's current tools accept. Unplugging before the
+default, which ST's current tools accept, and so is one written by
+ST-Link/V2 firmware (its last field is the SWIM version, which under the
+V2-1 identity reads as a mass storage version and makes OpenOCD refuse
+the probe). Unplugging before the
 application is installed is harmless: the installer finds its bootloader in
 place and returns to DFU. Losing power during the bootloader write itself
 (well under a second) leaves a probe that needs an SWD reflash.
@@ -544,6 +551,46 @@ A blank Blue Pill has no USB bootloader, so the first install is
 bootloader on USART1 (BOOT0 high, PA9/PA10, e.g. `stm32flash`). Afterwards
 `hybridlink update` works over USB as usual.
 
+## Hybridlink on cheap ST-Link/V2 clones
+
+The ST-Link/V2 "USB stick" clones sold for a dollar or two (USB
+`0483:3748`, STM32F103C8 or a compatible chip, ST's ST-Link/V2 firmware)
+take hybridlink over USB only, like a genuine probe. Tested on one with
+ST's V2J39S7 and, after STLinkUpgrade, V2J49S7: install from stock,
+`update`, `set-type` in both directions, `set-version`; st-flash (read,
+write + verify) and OpenOCD in ST-Link and CMSIS-DAP mode against an
+STM32F411.
+
+Things to know:
+
+* **Only SWD and NRST are wired.** The clones have no VCP and no SWO pins,
+  and the target voltage input reads a fixed value. SWD uses the same pins
+  as the ST-Link/V2-1 (PB13 clock, PB14 drive, PB12 sense), so the standard
+  build works unchanged.
+* **ST's bootloader stays.** The clones come with ST's V2 bootloader and
+  read protection, which on the F103 makes the first 4 KiB unwritable for
+  any code, including the installer (checked on the tested clone with a
+  write that changes no bit: write protection error on every testable
+  page). Lifting read protection erases the whole chip and needs SWD
+  access to the clone's MCU. `install` therefore puts the hybridlink
+  application under ST's bootloader; STLinkUpgrade can put ST's firmware
+  back at any time.
+* **Install right after plugging in.** ST's V2 firmware has no command to
+  switch to its bootloader (STLinkUpgrade asks for a replug as well), so
+  `install` asks you to unplug the probe, plug it in again and run it
+  straight away. Close STM32CubeIDE first: it opens ST-Links as they
+  appear and starts their firmware.
+* **ST's V2 bootloader does not start the application by itself.** After
+  power-up it waits in update mode until a host sends "exit DFU" (`F3 07`).
+  ST's tools, st-flash and OpenOCD send it, after which hybridlink
+  re-enumerates as `0483:3752`, so the first tool run after plugging in
+  may fail and the second works. The `hybridlink` tool starts the
+  application itself when it needs it.
+* **Serial number.** ST's V2 firmware and bootloader send the 12 UID bytes
+  raw; hybridlink reports them as hex, each 32-bit word byte-reversed, as
+  the V2-1 does. The `hybridlink` tool maps one to the other, so
+  `--serial` takes the hex form throughout.
+
 ## Protocol coverage
 
 Implemented: `F1` version, `F5` mode, `F7` target voltage, `F3 07` DFU exit,
@@ -588,7 +635,10 @@ Tested on a Jolt Connect against an STM32F407:
   `update` and `set-type` in both directions;
   on a rev D DIY probe (STM32F103C8, 64 KiB) with ST's V2J32M1 "STM32+Audio"
   firmware (USB 0483:374a): full conversion, old version reset; CubeIDE's
-  ST-Link update installs ST's firmware on the hybridlink bootloader
+  ST-Link update installs ST's firmware on the hybridlink bootloader;
+  on a cheap ST-Link/V2 clone (read protected, ST's V2J39S7 and V2J49S7):
+  the application under ST's bootloader, `update`, `set-type`,
+  `set-version`, STLinkUpgrade back to ST's firmware and `install` again
 * VCP: line coding, host -> target transmit, target -> host receive
   (16 KiB burst at 921600 baud, byte exact, while SWD is busy);
   STM32F407 at 2 Mbit/s with OpenOCD reading memory back to back over

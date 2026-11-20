@@ -86,6 +86,27 @@ static bool program(uint32_t addr, const uint8_t *s, uint32_t len)
     return ok;
 }
 
+/* can this page be programmed? Programs a halfword with the value it
+ * already has, 0xFFFF (erased) or 0x0000 (the F1 always allows programming
+ * zero): no bit changes either way, but a write protected page reports
+ * WRPRTERR. False when the page has no such halfword to test. */
+static bool page_writable(uint32_t addr)
+{
+    for (uint32_t i = 0; i < PAGE; i += 2) {
+        volatile uint16_t *d = (volatile uint16_t *)(addr + i);
+        uint16_t v = *d;
+        if (v != 0xFFFFu && v != 0)
+            continue;
+        unlock();
+        FLASH_CR = FLASH_CR_PG;
+        *d = v;
+        bool ok = wait();
+        FLASH_CR = FLASH_CR_LOCK;
+        return ok;
+    }
+    return false;
+}
+
 static bool page_matches(uint32_t addr, const uint8_t *s, uint32_t len)
 {
     const uint8_t *f = (const uint8_t *)addr;
@@ -166,10 +187,16 @@ static void install(void)
     if (same)
         return;
 
-    /* read protection write-protects the first 4 KiB; WRPR bits 0..3
-     * cover 0x08000000..0x08003FFF in 4 KiB steps */
-    if ((FLASH_OBR & OBR_RDPRT) || (FLASH_WRPR & 0xFu) != 0xFu)
+    /* WRPR bits 0..3 cover 0x08000000..0x08003FFF in 4 KiB steps. On ST's
+     * F103 read protection also write-protects the first 4 KiB (pages 0..3)
+     * against any code; some F103 clones (used on cheap ST-Link/V2 copies)
+     * may not, so with read protection set try those pages instead */
+    if ((FLASH_WRPR & 0xFu) != 0xFu)
         fail();
+    if (FLASH_OBR & OBR_RDPRT)
+        for (uint32_t off = 0; off < 4 * PAGE; off += PAGE)
+            if (!page_writable(BOOT_BASE + off))
+                fail();
 
     led(true);
     /* the vector table page last, so a cut short install is less likely

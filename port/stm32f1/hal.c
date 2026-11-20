@@ -186,6 +186,12 @@ void USB_LP_IRQHandler(void) { tud_int_handler(0); }
 
 void hal_usb_disconnect(void)
 {
+    /* while the USB macrocell is powered it owns PA11/PA12 and the GPIO
+     * settings below have no effect; a bootloader that jumps here without
+     * a reset (ST's) leaves it powered. Resetting it powers it down. */
+    RCC_APB1RSTR |= RCC_APB1_USB;
+    RCC_APB1RSTR &= ~RCC_APB1_USB;
+    RCC_APB1ENR &= ~RCC_APB1_USB;
     GPIO_BRR(USB_RENUM_PORT) = 1u << USB_RENUM_PIN;
     gpio_mode(USB_RENUM_PORT, USB_RENUM_PIN, GPIO_OUT_OD_10);
     /* drive D+ low as well so the host notices immediately */
